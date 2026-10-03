@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# Unit-test coverage for the iOS SDK's pure target, QaidFeedbackCore, with a gate.
+# Unit-test coverage for the iOS SDK's pure target, QaidThumbsCore, with a gate.
 #
 #   scripts/coverage-ios.sh
 #
 # Runs `swift test --enable-code-coverage`, prints llvm-cov's per-file table for
-# ios/Sources/QaidFeedbackCore only, and writes:
+# ios/Sources/QaidThumbsCore only, and writes:
 #   coverage/ios/summary.json   llvm-cov's own JSON summary (per file and total)
 #   coverage/ios/totals.json    {"lines", "functions", "regions"} percentages, for coverage.sh
 # Exits non-zero when the tests fail or lines, functions or regions fall under the gate.
 #
 # Swift has no branch counter; regions (every `if`, `??`, `&&` arm and closure) are the
-# branch measure here. QaidFeedback (UIKit) compiles to nothing on macOS, so it has no
-# coverage to report: its logic is tested by moving it into Core.
+# branch measure here. QaidThumbs (SwiftUI, UIKit) compiles to nothing on macOS, so it has no
+# coverage to report: its logic lives in Core, and the views stay thin.
 set -euo pipefail
 
 # The gate: one point under the measured numbers, never under 95. Raise it with the numbers.
@@ -23,7 +23,7 @@ GATE_REGIONS="${GATE_REGIONS:-98}"
 export PATH="/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:$PATH"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$ROOT/coverage/ios"
-SOURCES="$ROOT/ios/Sources/QaidFeedbackCore"
+SOURCES="$ROOT/ios/Sources/QaidThumbsCore"
 # A shell alias or a toolchain manager can shadow `swift`; the system one is what CI has.
 SWIFT=/usr/bin/swift
 [ -x "$SWIFT" ] || SWIFT="$(command -v swift)"
@@ -41,13 +41,13 @@ grep -E "^[[:space:]]*Executed [0-9]+ tests?" "$OUT/test.log" | tail -n 1
 
 BIN_DIR="$("$SWIFT" build --show-bin-path)"
 PROFDATA="$BIN_DIR/codecov/default.profdata"
-TEST_BIN="$BIN_DIR/QaidFeedbackCoreTests.xctest/Contents/MacOS/QaidFeedbackCoreTests"
+TEST_BIN="$BIN_DIR/QaidThumbsCoreTests.xctest/Contents/MacOS/QaidThumbsCoreTests"
 for f in "$PROFDATA" "$TEST_BIN"; do
     [ -e "$f" ] || { echo "missing $f" >&2; exit 1; }
 done
 
 echo
-echo "== iOS: QaidFeedbackCore"
+echo "== iOS: QaidThumbsCore"
 xcrun llvm-cov report "$TEST_BIN" -instr-profile="$PROFDATA" -show-branch-summary=false "$SOURCES"
 xcrun llvm-cov export -summary-only "$TEST_BIN" -instr-profile="$PROFDATA" "$SOURCES" >"$OUT/summary.json"
 

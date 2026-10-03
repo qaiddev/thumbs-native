@@ -3,13 +3,15 @@
 #
 #   scripts/coverage-android.sh
 #
-# Runs the debug unit tests under Kover (configured in android/build.gradle.kts, the
-# standalone root build: apps that include :qaidfeedback by source never load Kover) and
-# prints a per-file table. Writes:
-#   coverage/android/core.xml       dev.qaid.feedback.core only: the gated scope
-#   coverage/android/all.xml        everything, internal/ and QaidFeedback.kt included
+# Runs the debug unit tests (JVM tests of dev.qaid.thumbs.core, plus Robolectric +
+# compose-ui-test tests of the sheet, the markup editor and QaidThumbs.present) under Kover,
+# configured in android/build.gradle.kts — the standalone root build: apps that include
+# :qaidthumbs by source never load Kover. Prints per-file tables, core and the rest apart.
+# Writes:
+#   coverage/android/core.xml       dev.qaid.thumbs.core only: the gated scope
+#   coverage/android/all.xml        everything, ui/ internal/ and QaidThumbs.kt included
 #   coverage/android/html/          the same, browsable
-#   coverage/android/totals.json    {"lines", "branches"} for core, for coverage.sh
+#   coverage/android/totals.json    {"lines", "branches"} for core, plus "ui" (not gated), for coverage.sh
 # Exits non-zero when a test fails or core falls under the gate (koverVerifyCore).
 set -euo pipefail
 
@@ -17,7 +19,7 @@ export PATH="/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:$PATH"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ANDROID="$ROOT/android"
 OUT="$ROOT/coverage/android"
-REPORTS="$ANDROID/qaidfeedback/build/reports/kover"
+REPORTS="$ANDROID/qaidthumbs/build/reports/kover"
 if [ -z "${ANDROID_HOME:-}" ] && [ ! -f "$ANDROID/local.properties" ]; then
     export ANDROID_HOME="$HOME/Library/Android/sdk"
 fi
@@ -29,8 +31,8 @@ echo "== Android: debug unit tests under Kover"
 # --continue: the reports are written even when the gate fails, so the table shows why.
 status=0
 "$ANDROID/gradlew" -p "$ANDROID" --no-daemon --continue -q \
-    :qaidfeedback:koverXmlReportCore :qaidfeedback:koverXmlReportDebug :qaidfeedback:koverHtmlReportDebug \
-    :qaidfeedback:koverVerifyCore || status=$?
+    :qaidthumbs:koverXmlReportCore :qaidthumbs:koverXmlReportDebug :qaidthumbs:koverHtmlReportDebug \
+    :qaidthumbs:koverVerifyCore || status=$?
 
 [ -f "$REPORTS/reportCore.xml" ] || { echo "no Kover report: the tests did not run" >&2; exit 1; }
 cp "$REPORTS/reportCore.xml" "$OUT/core.xml"
@@ -42,36 +44,44 @@ import json, os, sys
 import xml.etree.ElementTree as ET
 
 out = sys.argv[1]
+CORE = "dev/qaid/thumbs/core"
 
-def pct(c, t):
-    missed, covered = c.get(t, (0, 0))
+def pct(missed, covered):
     total = missed + covered
     return (100.0 * covered / total if total else 100.0), covered, total
 
 def counters(node):
     return {c.get("type"): (int(c.get("missed")), int(c.get("covered"))) for c in node.findall("counter")}
 
-def table(path, title):
+def table(path, title, keep=lambda pkg: True):
     root = ET.parse(path).getroot()
+    sums = {"LINE": [0, 0], "BRANCH": [0, 0]}
     print(f"\n== Android: {title}")
     print(f"{'File':<44} {'Lines':>17} {'Branches':>17}")
     for pkg in root.findall("package"):
+        if not keep(pkg.get("name")):
+            continue
         for sf in sorted(pkg.findall("sourcefile"), key=lambda s: s.get("name")):
             c = counters(sf)
-            name = (pkg.get("name").removeprefix("dev/qaid/feedback").strip("/") + "/" + sf.get("name")).lstrip("/")
+            name = (pkg.get("name").removeprefix("dev/qaid/thumbs").strip("/") + "/" + sf.get("name")).lstrip("/")
             cells = []
             for t in ("LINE", "BRANCH"):
-                p, cov, tot = pct(c, t)
+                m, cov = c.get(t, (0, 0))
+                sums[t][0] += m
+                sums[t][1] += cov
+                p, cov, tot = pct(m, cov)
                 cells.append(f"{p:6.2f}% {cov:>4}/{tot:<4}" if tot else f"{'-':>17}")
             print(f"{name:<44} {cells[0]:>17} {cells[1]:>17}")
-    c = counters(root)
-    lines, branches = pct(c, "LINE")[0], pct(c, "BRANCH")[0]
+    lines, branches = pct(*sums["LINE"])[0], pct(*sums["BRANCH"])[0]
     print(f"{'TOTAL':<44} {lines:6.2f}%{'':>10} {branches:6.2f}%")
     return lines, branches
 
-table(os.path.join(out, "all.xml"), "everything (internal/ needs a device; not gated)")
-lines, branches = table(os.path.join(out, "core.xml"), "dev.qaid.feedback.core (gated)")
-json.dump({"lines": round(lines, 2), "branches": round(branches, 2)}, open(os.path.join(out, "totals.json"), "w"), indent=2)
+ui_lines, ui_branches = table(os.path.join(out, "all.xml"), "ui/, internal/, QaidThumbs.kt (Robolectric flows; not gated)",
+                              keep=lambda pkg: pkg != CORE)
+lines, branches = table(os.path.join(out, "core.xml"), "dev.qaid.thumbs.core (gated)")
+json.dump({"lines": round(lines, 2), "branches": round(branches, 2),
+           "ui": {"lines": round(ui_lines, 2), "branches": round(ui_branches, 2)}},
+          open(os.path.join(out, "totals.json"), "w"), indent=2)
 PY
 
 if [ "$status" -ne 0 ]; then

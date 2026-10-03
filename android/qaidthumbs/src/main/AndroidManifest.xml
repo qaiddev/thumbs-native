@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Merged into the host app. Screen recording on Android 14+ must run in a foreground
+     service of type mediaProjection, started after the person consents; the service is
+     not exported and only this library starts it. Play asks apps that declare
+     FOREGROUND_SERVICE_MEDIA_PROJECTION to explain it in the Play Console.
+     ACCESS_NETWORK_STATE lets saved (offline) reports go out the moment a network returns. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+
+    <application>
+        <service
+            android:name="dev.qaid.thumbs.internal.QaidRecordService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+    </application>
+</manifest>
