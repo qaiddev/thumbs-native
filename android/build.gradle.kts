@@ -2,6 +2,8 @@ import com.vanniktech.maven.publish.AndroidSingleVariantLibrary
 import com.vanniktech.maven.publish.JavadocJar
 import com.vanniktech.maven.publish.MavenPublishBaseExtension
 import com.vanniktech.maven.publish.SourcesJar
+import kotlinx.kover.gradle.plugin.dsl.CoverageUnit
+import kotlinx.kover.gradle.plugin.dsl.KoverProjectExtension
 
 // Publishing lives here, not in qaidfeedback/build.gradle.kts: apps build that module from
 // source with their own plugin classpath, which has no publishing plugin on it. Only this
@@ -17,6 +19,7 @@ import com.vanniktech.maven.publish.SourcesJar
 plugins {
     id("com.android.library") apply false
     id("com.vanniktech.maven.publish") version "0.37.0" apply false
+    id("org.jetbrains.kotlinx.kover") version "0.9.11" apply false
 }
 
 /** Sign only when a key is present, so a local publish works on a machine without one. */
@@ -64,6 +67,43 @@ project(":qaidfeedback") {
                     url.set("https://github.com/qaiddev/qaid-native")
                     connection.set("scm:git:https://github.com/qaiddev/qaid-native.git")
                     developerConnection.set("scm:git:ssh://git@github.com/qaiddev/qaid-native.git")
+                }
+            }
+        }
+    }
+}
+
+// Coverage, also from here and not the module's own build, for the same reason as publishing:
+// an app that builds :qaidfeedback from source has no Kover on its classpath.
+//
+//   ./gradlew --no-daemon :qaidfeedback:koverVerifyCore          the gate (dev.qaid.feedback.core)
+//   ./gradlew --no-daemon :qaidfeedback:koverXmlReportCore       the gated scope, as XML
+//   ./gradlew --no-daemon :qaidfeedback:koverHtmlReportDebug     everything, internal/ included
+//
+// `core` is the pure, JVM-tested package; internal/ and QaidFeedback.kt need a device, so
+// they are reported but not gated. ../scripts/coverage-android.sh runs all three.
+//
+// The gate is one point under the measured numbers, never under 95; raise it with them.
+// The branches still missed are Kotlin's null checks inside `?.` chains on calls that
+// never return null (`value?.trim()?.take(n)`), which no input can reach.
+// -PcoverageLineGate / -PcoverageBranchGate override it, to check the gate fails.
+val coreLineGate = providers.gradleProperty("coverageLineGate").map(String::toInt).getOrElse(99)
+val coreBranchGate = providers.gradleProperty("coverageBranchGate").map(String::toInt).getOrElse(97)
+
+project(":qaidfeedback") {
+    pluginManager.withPlugin("com.android.library") {
+        pluginManager.apply("org.jetbrains.kotlinx.kover")
+        extensions.configure<KoverProjectExtension> {
+            currentProject {
+                createVariant("core") { add("debug") }
+            }
+            reports {
+                variant("core") {
+                    filters { includes { packages("dev.qaid.feedback.core") } }
+                    verify {
+                        rule("core lines") { bound { minValue = coreLineGate; coverageUnits = CoverageUnit.LINE } }
+                        rule("core branches") { bound { minValue = coreBranchGate; coverageUnits = CoverageUnit.BRANCH } }
+                    }
                 }
             }
         }

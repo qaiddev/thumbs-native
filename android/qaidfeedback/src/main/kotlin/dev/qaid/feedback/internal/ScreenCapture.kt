@@ -7,9 +7,8 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Base64
 import android.view.PixelCopy
+import dev.qaid.feedback.core.ImageSizing
 import java.io.ByteArrayOutputStream
-import kotlin.math.max
-import kotlin.math.roundToInt
 
 /**
  * Copies the activity's window into a bitmap with PixelCopy — the GPU's own frame, so
@@ -47,10 +46,9 @@ internal object ScreenCapture {
 
     /** A WebP (JPEG before Android 11) data URL, at most [maxDimension] on its long edge. */
     fun dataUrl(bitmap: Bitmap, maxDimension: Int = 1600, quality: Int = 80): String? {
-        val long = max(bitmap.width, bitmap.height)
-        val scaled = if (long > maxDimension) {
-            val f = maxDimension.toFloat() / long
-            Bitmap.createScaledBitmap(bitmap, (bitmap.width * f).roundToInt(), (bitmap.height * f).roundToInt(), true)
+        val (width, height) = ImageSizing.fit(bitmap.width, bitmap.height, maxDimension)
+        val scaled = if (width != bitmap.width || height != bitmap.height) {
+            Bitmap.createScaledBitmap(bitmap, width, height, true)
         } else bitmap
         val out = ByteArrayOutputStream()
         val (format, mime) = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {

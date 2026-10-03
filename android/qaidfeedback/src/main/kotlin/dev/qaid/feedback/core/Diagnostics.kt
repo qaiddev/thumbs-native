@@ -91,7 +91,8 @@ object ConsoleLogs {
             val key = "$millis|$levelChar|$tag"
             // logcat pads the tag ("chatty  : …"); keep "Tag: message".
             val body = if (':' in rest) rest.substringAfter(':').trim() else rest.trim()
-            if (key == lastKey && out.isNotEmpty()) {
+            // lastKey is only ever set below, once `out` holds an entry, so `out.last()` is safe.
+            if (key == lastKey) {
                 val prev = out.last()
                 if (prev.message.length < MAX_MESSAGE_LENGTH) {
                     out[out.size - 1] = prev.copy(message = (prev.message + "\n" + body).take(MAX_MESSAGE_LENGTH))

@@ -72,7 +72,7 @@ struct FallbackForm: View {
                         .background(RoundedRectangle(cornerRadius: 14).fill(surface))
                         .overlay(RoundedRectangle(cornerRadius: 14).stroke(line, lineWidth: 1))
                     if let status = model.status {
-                        Text(statusText(status))
+                        Text(SheetContent.statusLine(status, text: text))
                             .font(.footnote)
                             .foregroundColor(status.state == .error ? negative : sent ? positive : .secondary)
                             .frame(maxWidth: .infinity)
@@ -139,7 +139,7 @@ struct FallbackForm: View {
                 Image(systemName: "record.circle").font(.title).foregroundColor(negative)
                 VStack(alignment: .leading) {
                     Text(text.screenRecording).font(.headline)
-                    Text(videoMeta(duration: duration, size: size)).font(.subheadline).foregroundColor(.secondary)
+                    Text(RecordingFormat.videoMeta(durationSec: duration, sizeBytes: size)).font(.subheadline).foregroundColor(.secondary)
                 }
             }
         case .none:
@@ -161,20 +161,5 @@ struct FallbackForm: View {
         .accessibilityAddTraits(on ? .isSelected : [])
     }
 
-    private func statusText(_ status: StatusMessage) -> String {
-        switch status.state {
-        case .sending: return text.sending
-        case .sent: return text.sent
-        case .queued: return text.queued
-        case .error: return "\(status.error ?? text.errorGeneric) \(text.retry)"
-        }
-    }
-
-    private func videoMeta(duration: Double, size: Int?) -> String {
-        let whole = Int(duration.rounded())
-        var text = String(format: "%d:%02d", whole / 60, whole % 60)
-        if let size, size > 0 { text += String(format: " · %.1f MB", Double(size) / 1_048_576) }
-        return text
-    }
 }
 #endif

@@ -8,8 +8,9 @@ import android.net.Network
 import dev.qaid.feedback.QaidFeedback
 import dev.qaid.feedback.core.FeedbackRequests
 import dev.qaid.feedback.core.QaidConfig
-import dev.qaid.feedback.core.QaidResult
 import dev.qaid.feedback.core.QueueEntry
+import dev.qaid.feedback.core.QueueFiles
+import dev.qaid.feedback.core.QueueFlush
 import dev.qaid.feedback.core.QueuePolicy
 import dev.qaid.feedback.core.QueuedReport
 import kotlinx.coroutines.CoroutineScope
@@ -110,10 +111,10 @@ internal object ReportQueue {
                     FeedbackRequests.videoRequest(config.videoEndpoint, report.userAgent, report.fields, video)
                 }
             }
-            when (val result = FeedbackClient.sendOnce(request)) {
-                is QaidResult.Success -> delete(dir, report.id)
+            when (QueueFlush.after(FeedbackClient.sendOnce(request))) {
+                QueueFlush.Step.DELETE -> delete(dir, report.id)
                 // Still offline, or the server is down: keep this and everything after it.
-                is QaidResult.Failure -> if (result.error.isRetryable) return else delete(dir, report.id)
+                QueueFlush.Step.STOP -> return
             }
         }
     }
@@ -146,11 +147,10 @@ internal object ReportQueue {
 
     /** Applies [QueuePolicy] and sweeps half-written leftovers. Call holding [lock]. */
     private fun prune(dir: File) {
-        val files = dir.listFiles() ?: return
-        val ids = files.filter { it.name.endsWith(".json") }.map { it.name.removeSuffix(".json") }.toSet()
+        val names = (dir.listFiles() ?: return).map { it.name }
+        val ids = QueueFiles.manifestIds(names)
         // A video with no manifest, or a manifest that never got renamed, is a crash mid-save.
-        files.filter { it.name.endsWith(".tmp") || (it.name.endsWith(".mp4") && it.name.removeSuffix(".mp4") !in ids) }
-            .forEach { it.delete() }
+        QueueFiles.leftovers(names).forEach { File(dir, it).delete() }
         val entries = ids.mapNotNull { id ->
             val manifest = manifestFile(dir, id)
             val report = runCatching { QueuedReport.decode(manifest.readText()) }.getOrNull()

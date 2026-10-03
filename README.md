@@ -1,5 +1,7 @@
 # qaid feedback for iOS and Android
 
+[![coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fqaiddev%2Fqaid-native%2Fprod%2Fcoverage-badge.json)](#coverage)
+
 Thumbs feedback for native apps, sent to your [qaid.dev](https://qaid.dev) project's inbox. It does what
 [`@qaiddev/thumbs-embed`](https://github.com/qaiddev/thumbs-embed) does on the web: thumbs up or down, a
 screenshot the person can mark up, a message, and an optional screen recording.
@@ -151,6 +153,20 @@ Release: bump `QaidSDK.version` (iOS) and `QaidSdk.VERSION` (Android) and the co
 `android/build.gradle.kts`. Tag `x.y.z`; the tag is the Swift release. Then publish the AAR from `android/`
 with `./gradlew --no-daemon :qaidfeedback:publishAndReleaseToMavenCentral`. It needs `mavenCentralUsername`,
 `mavenCentralPassword` and `signingInMemoryKey` in `~/.gradle/gradle.properties`.
+
+## Coverage
+
+```sh
+scripts/coverage.sh            # both platforms, then coverage-badge.json
+scripts/coverage-ios.sh        # swift test + llvm-cov, QaidFeedbackCore only
+scripts/coverage-android.sh    # debug unit tests + Kover
+```
+
+The gate covers the pure code each platform tests without a device: `QaidFeedbackCore` on iOS
+(lines, functions and regions, since Swift counts no branches) and `dev.qaid.feedback.core` on Android
+(lines and branches). Each script fails when its numbers drop under the gate. The UIKit and Android
+framework code is not gated; its decisions live in the core so they are tested there. The badge
+shows the lower of the two platforms' line coverage; commit `coverage-badge.json` after a run.
 
 ## License
 

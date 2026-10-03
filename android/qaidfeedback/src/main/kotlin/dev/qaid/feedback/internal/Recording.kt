@@ -24,6 +24,7 @@ import androidx.core.view.WindowInsetsCompat
 import dev.qaid.feedback.core.QaidConfig
 import dev.qaid.feedback.core.QaidError
 import dev.qaid.feedback.core.QaidText
+import dev.qaid.feedback.core.RecordingFormat
 import dev.qaid.feedback.core.VideoPolicy
 import java.io.File
 import java.lang.ref.WeakReference
@@ -153,8 +154,7 @@ private class StopOverlay(
 
     private val tick = object : Runnable {
         override fun run() {
-            val whole = Recording.elapsedSeconds().toInt()
-            pill?.text = String.format(java.util.Locale.US, "●  %d:%02d   %s", whole / 60, whole % 60, stopLabel)
+            pill?.text = RecordingFormat.pill(Recording.elapsedSeconds(), stopLabel)
             handler.postDelayed(this, 500)
         }
     }

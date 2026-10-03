@@ -41,6 +41,8 @@ import dev.qaid.feedback.core.InitMessage
 import dev.qaid.feedback.core.PageMessage
 import dev.qaid.feedback.core.QaidConfig
 import dev.qaid.feedback.core.QuestMessage
+import dev.qaid.feedback.core.RecordingFormat
+import dev.qaid.feedback.core.SheetContent
 import dev.qaid.feedback.core.StatusMessage
 
 /**
@@ -254,8 +256,7 @@ internal class FeedbackDialog(
                     column.addView(attach)
                 }
                 is BridgeAttachment.Video -> {
-                    val whole = a.durationSec.toInt()
-                    column.addView(label(String.format(java.util.Locale.US, "●  %s · %d:%02d", strings.screenRecording, whole / 60, whole % 60), negative, 16f, bold = true),
+                    column.addView(label(RecordingFormat.formLabel(a.durationSec, strings.screenRecording), negative, 16f, bold = true),
                         LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
                 }
                 BridgeAttachment.None -> Unit
@@ -306,19 +307,19 @@ internal class FeedbackDialog(
             when (status.state) {
                 StatusMessage.State.SENDING -> {
                     statusText.setTextColor(muted)
-                    statusText.text = strings.sending
+                    statusText.text = SheetContent.statusLine(status, strings)
                     send.isEnabled = false
                 }
                 StatusMessage.State.SENT, StatusMessage.State.QUEUED -> {
                     sent = true
                     statusText.setTextColor(positive)
-                    statusText.text = if (status.state == StatusMessage.State.SENT) strings.sent else strings.queued
+                    statusText.text = SheetContent.statusLine(status, strings)
                     send.text = strings.done
                     send.isEnabled = true
                 }
                 StatusMessage.State.ERROR -> {
                     statusText.setTextColor(negative)
-                    statusText.text = "${status.error ?: strings.couldNotSend} ${strings.retry}"
+                    statusText.text = SheetContent.statusLine(status, strings)
                     send.isEnabled = true
                 }
             }

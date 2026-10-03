@@ -200,8 +200,7 @@ final class StopControlWindow: QaidOverlayWindow {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     func setElapsed(_ seconds: TimeInterval) {
-        let whole = Int(seconds)
-        var title = AttributedString(String(format: "●  %d:%02d   %@", whole / 60, whole % 60, stopTitle))
+        var title = AttributedString(RecordingFormat.pill(elapsed: seconds, stop: stopTitle))
         title.font = .monospacedDigitSystemFont(ofSize: 15, weight: .semibold)
         UIView.performWithoutAnimation {
             pill.configuration?.attributedTitle = title

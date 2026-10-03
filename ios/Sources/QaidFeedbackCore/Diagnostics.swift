@@ -121,6 +121,8 @@ public enum NetworkPrivacy {
             parts.fragment = nil
             parts.user = nil
             parts.password = nil
+            // Not known to fail for components parsed from a string (only removing parts
+            // here), so the fall-through below is a guard, not a tested path.
             if let text = parts.string { return String(text.prefix(2000)) }
         }
         let cut = trimmed.firstIndex { $0 == "?" || $0 == "#" } ?? trimmed.endIndex

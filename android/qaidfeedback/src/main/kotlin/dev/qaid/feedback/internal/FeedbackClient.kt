@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.res.Resources
 import android.os.Build
 import dev.qaid.feedback.core.DeviceInfo
+import dev.qaid.feedback.core.DeviceNames
 import dev.qaid.feedback.core.FeedbackRequests
 import dev.qaid.feedback.core.QaidConfig
 import dev.qaid.feedback.core.QaidError
@@ -84,11 +85,9 @@ internal class FeedbackClient(
             @Suppress("DEPRECATION")
             val build = if (Build.VERSION.SDK_INT >= 28) info?.longVersionCode?.toString() else info?.versionCode?.toString()
             val metrics = Resources.getSystem().displayMetrics
-            val model = if (Build.MODEL.startsWith(Build.MANUFACTURER, ignoreCase = true)) Build.MODEL
-            else "${Build.MANUFACTURER} ${Build.MODEL}"
             return DeviceInfo(
                 osVersion = Build.VERSION.RELEASE ?: Build.VERSION.SDK_INT.toString(),
-                model = model,
+                model = DeviceNames.model(Build.MANUFACTURER, Build.MODEL),
                 appName = appName,
                 appVersion = info?.versionName ?: "0",
                 build = build ?: "0",

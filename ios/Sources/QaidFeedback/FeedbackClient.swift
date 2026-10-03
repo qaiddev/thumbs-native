@@ -50,10 +50,8 @@ final class FeedbackClient {
                 let (data, response) = try await attempt()
                 let status = (response as? HTTPURLResponse)?.statusCode ?? 0
                 outcome = FeedbackRequests.parseResponse(status: status, body: data)
-            } catch let error as QaidError {
-                outcome = .failure(error)
             } catch {
-                outcome = .failure(.network(error.localizedDescription))
+                outcome = .failure(QaidError.from(error))
             }
             switch outcome {
             case .success(let id):

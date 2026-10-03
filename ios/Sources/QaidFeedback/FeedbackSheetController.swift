@@ -134,9 +134,7 @@ final class FeedbackSheetController: UIViewController, WKNavigationDelegate {
     }
 
     private func origin(of origin: WKSecurityOrigin) -> String {
-        let scheme = origin.protocol.lowercased()
-        let host = origin.host.lowercased()
-        return origin.port == 0 ? "\(scheme)://\(host)" : "\(scheme)://\(host):\(origin.port)"
+        QaidConfiguration.origin(scheme: origin.protocol, host: origin.host, port: origin.port)
     }
 
     // MARK: WKNavigationDelegate

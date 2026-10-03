@@ -8,14 +8,12 @@ import dev.qaid.feedback.core.BridgeTheme
 import dev.qaid.feedback.core.ConsoleLogs
 import dev.qaid.feedback.core.FeedbackKind
 import dev.qaid.feedback.core.FeedbackRequests
-import dev.qaid.feedback.core.InitMessage
 import dev.qaid.feedback.core.LogEntry
-import dev.qaid.feedback.core.NeonAccent
 import dev.qaid.feedback.core.QaidConfig
-import dev.qaid.feedback.core.QaidError
 import dev.qaid.feedback.core.QuestMessage
 import dev.qaid.feedback.core.ReportContext
 import dev.qaid.feedback.core.ScreenshotSubmission
+import dev.qaid.feedback.core.SheetContent
 import dev.qaid.feedback.core.StatusMessage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
@@ -76,22 +74,14 @@ internal class FeedbackSession(
         val activity = activityRef.get()
         if (activity == null || activity.isFinishing || activity.isDestroyed) return finish()
         val theme = if (dark) BridgeTheme.DARK else BridgeTheme.LIGHT
-        val current = video
-        val attachment = when {
-            current != null -> BridgeAttachment.Video(current.durationSec, current.sizeBytes)
-            screenshot != null -> BridgeAttachment.Image(screenshot!!)
-            else -> BridgeAttachment.None
-        }
-        val init = InitMessage(
+        val init = SheetContent.initMessage(
+            config = config,
             theme = theme,
-            accent = config.accent ?: NeonAccent.forTheme(theme),
-            palette = config.palette,
-            attachment = attachment,
-            canRecord = config.allowRecording && current == null && Recording.canRecord(activity),
-            appName = config.appName,
-            feedbackType = draftKind,
-            message = draftMessage,
-            text = config.text.shared(config.appName),
+            screenshot = screenshot,
+            video = video?.let { BridgeAttachment.Video(it.durationSec, it.sizeBytes) },
+            draftKind = draftKind,
+            draftMessage = draftMessage,
+            deviceCanRecord = Recording.canRecord(activity),
         )
         dialog = FeedbackDialog(activity, config, init, this).also { it.show() }
     }
@@ -131,12 +121,9 @@ internal class FeedbackSession(
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                val error = e as? QaidError ?: QaidError.Network(e.message ?: "")
-                if (error.isRetryable && queue(recorded, fields, body)) {
-                    dialog?.showStatus(StatusMessage(StatusMessage.State.QUEUED))
-                } else {
-                    dialog?.showStatus(StatusMessage(StatusMessage.State.ERROR, error.userMessage(config.text)))
-                }
+                val error = SheetContent.error(e)
+                val queued = error.isRetryable && queue(recorded, fields, body)
+                dialog?.showStatus(SheetContent.failureStatus(error, queued, config.text))
             } finally {
                 sending = null
             }

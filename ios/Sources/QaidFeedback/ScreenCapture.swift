@@ -41,11 +41,7 @@ enum ScreenCapture {
     /// A JPEG data URL no larger than `maxDimension` on its long edge. WebKit draws it
     /// straight onto the annotate canvas.
     static func dataURL(for image: UIImage, maxDimension: CGFloat = 1600, quality: CGFloat = 0.8) -> String? {
-        let size = image.size
-        let pixelsLong = max(size.width, size.height) * image.scale
-        let factor = pixelsLong > maxDimension ? maxDimension / pixelsLong : 1
-        let target = CGSize(width: (size.width * image.scale * factor).rounded(),
-                            height: (size.height * image.scale * factor).rounded())
+        let target = ImageSizing.pixelSize(of: image.size, scale: image.scale, maxDimension: maxDimension)
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
         format.opaque = true

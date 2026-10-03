@@ -89,9 +89,8 @@ final class FeedbackQueue {
                         _ = try await client.send(videoFields: pairs, videoURL: video)
                     }
                     store.remove(item.id)
-                } catch let error as QaidError where error.isRetryable {
-                    return
                 } catch {
+                    if QueueFlush.step(after: error) == .stop { return }
                     store.remove(item.id)
                 }
             }

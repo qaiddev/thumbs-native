@@ -40,24 +40,10 @@ final class FeedbackCoordinator: FeedbackSheetDelegate {
             return
         }
         let theme: BridgeTheme = host.traitCollection.userInterfaceStyle == .light ? .light : .dark
-        let attachment: BridgeAttachment
-        if let video {
-            attachment = .video(durationSec: video.durationSec, sizeBytes: video.sizeBytes)
-        } else if let screenshot {
-            attachment = .image(dataUrl: screenshot)
-        } else {
-            attachment = .none
-        }
-        let message = InitMessage(
-            theme: theme,
-            accent: config.accent ?? .forTheme(theme),
-            palette: config.palette,
-            attachment: attachment,
-            canRecord: config.allowRecording && video == nil,
-            appName: config.appName,
-            feedbackType: draftKind,
-            message: draftMessage,
-            text: config.text.bridgeText(appName: config.appName)
+        let message = SheetContent.initMessage(
+            config: config, theme: theme, screenshot: screenshot,
+            video: video.map { (durationSec: $0.durationSec, sizeBytes: $0.sizeBytes) },
+            draftKind: draftKind, draftMessage: draftMessage
         )
         let controller = FeedbackSheetController(config: config, initMessage: message, delegate: self)
         sheet = controller
@@ -114,13 +100,13 @@ final class FeedbackCoordinator: FeedbackSheetDelegate {
                                          metadata: metadata))
             }
         } catch {
-            let qaid = error as? QaidError ?? .network(error.localizedDescription)
+            let qaid = QaidError.from(error)
+            var queued = false
             // Closing the sheet mid-send cancels it; that isn't a report to keep.
-            if qaid.isRetryable, !Task.isCancelled, let save, (try? await save()) != nil {
-                sheet?.show(StatusMessage(state: .queued))
-            } else {
-                sheet?.show(StatusMessage(state: .error, error: qaid.userMessage(config.text)))
+            if qaid.isRetryable, !Task.isCancelled, let save {
+                queued = (try? await save()) != nil
             }
+            sheet?.show(SheetContent.failureStatus(qaid, queued: queued, text: config.text))
         }
     }
 

@@ -100,19 +100,7 @@ public enum QaidFeedback {
     /// Call from a URLSession completion: records the call only when it failed (an
     /// error, or HTTP 400 and up). Nothing from the body or headers is kept.
     nonisolated public static func record(request: URLRequest, response: URLResponse?, error: Error?) {
-        guard let url = request.url?.absoluteString else { return }
-        let method = request.httpMethod ?? "GET"
-        let http = response as? HTTPURLResponse
-        if let error {
-            let ns = error as NSError
-            // The app cancelled it; nothing went wrong.
-            if ns.domain == NSURLErrorDomain && ns.code == NSURLErrorCancelled { return }
-            recordNetworkError(url: url, method: method, status: http?.statusCode ?? 0,
-                               statusText: ns.localizedDescription)
-        } else if let http, http.statusCode >= 400 {
-            recordNetworkError(url: url, method: method, status: http.statusCode,
-                               statusText: HTTPURLResponse.localizedString(forStatusCode: http.statusCode))
-        }
+        DiagnosticsStore.shared.record(request: request, response: response, error: error)
     }
 
     // MARK: Privacy and triggers
