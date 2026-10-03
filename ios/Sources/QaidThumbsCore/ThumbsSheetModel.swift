@@ -53,6 +53,8 @@ package struct ThumbsSheetModel: Equatable, Sendable {
     /// Sent or queued: the report is out of the person's hands.
     package private(set) var finished = false
     package private(set) var status: Status?
+    /// The screenshot was marked up or removed: work a dismissal would lose.
+    package private(set) var screenshotEdited = false
     private let allowRecording: Bool
 
     package init(config: QaidThumbsConfiguration, attachment: ThumbsAttachment, allowRecording: Bool = true,
@@ -110,10 +112,14 @@ package struct ThumbsSheetModel: Equatable, Sendable {
     package var isUpPressed: Bool { kind == .up }
     package var isDownPressed: Bool { kind == .down }
 
-    /// Something a swipe down would lose: a send running, or thumbs or words not yet sent.
-    /// The presented sheet then closes only through Cancel.
+    /// Something a swipe down would lose: a send running, or, before it has gone, a thumb,
+    /// words, a recording, or a screenshot marked up or removed. A swipe then asks before
+    /// discarding (Android's Back does the same); Cancel stays a plain, deliberate close.
     package var protectsDraft: Bool {
-        busy || (!finished && (kind != .neutral || !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
+        if busy { return true }
+        if finished { return false }
+        return kind != .neutral || !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || isVideo || screenshotEdited
     }
 
     /// Cancel, or Close once sent.
@@ -165,6 +171,7 @@ package struct ThumbsSheetModel: Equatable, Sendable {
     package mutating func removeImage() {
         guard showsRemove, toolsEnabled else { return }
         attachment = .none
+        screenshotEdited = true
     }
 
     /// The marked-up screenshot replaces the one shown. Anything but an image data URL
@@ -172,6 +179,7 @@ package struct ThumbsSheetModel: Equatable, Sendable {
     package mutating func applyMarkup(_ dataUrl: String) {
         guard showsMarkup, toolsEnabled, FeedbackRequests.isImageDataUrl(dataUrl) else { return }
         attachment = .image(dataUrl: dataUrl)
+        screenshotEdited = true
     }
 
     /// A finished recording replaces the screenshot; the thumbs and words stay.

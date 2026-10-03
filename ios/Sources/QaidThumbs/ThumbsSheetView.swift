@@ -20,6 +20,11 @@ import UIKit
 /// The same form `QaidThumbs.present()` shows, minus Record screen: recording needs the
 /// sheet off screen, which only `present()` can do. `onClose` must take the sheet away;
 /// it is called for Cancel, Done, and before `QaidThumbs.onLinkedQuest`.
+///
+/// While there is a draft (a thumb, words, a marked-up or removed screenshot, a send
+/// running) a swipe down can't take it away — SwiftUI offers no hook to ask first, so
+/// Cancel is the way out. While it is up, `present()` and shake to report don't open a
+/// second sheet.
 public struct QaidThumbsSheet: View {
     private let screenshot: UIImage?
     private let screen: String?
@@ -61,12 +66,24 @@ struct ThumbsSheetContainer: View {
 
     var body: some View {
         ThumbsSheetView(session: session)
+            .interactiveDismissDisabled(session.model.protectsDraft)
             .onAppear {
                 let close = onClose
+                let session = session
                 session.dismiss = { then in
                     close()
                     DispatchQueue.main.async(execute: then)
                 }
+                session.onFinish = { [weak session] in
+                    if let session { QaidThumbs.sheetClosed(session) }
+                }
+                QaidThumbs.sheetOpened(session)
+            }
+            .onDisappear {
+                // Gone for good (a swipe, or the app's own binding) — not just covered by the
+                // markup editor, which some iOS versions report as a disappearance too.
+                guard session.markup == nil else { return }
+                session.dismissedBySystem()
             }
     }
 }
@@ -119,6 +136,10 @@ struct ThumbsSheetView: View {
             MarkupEditorView(request: request, config: session.config, look: look,
                              onFinish: { session.markupFinished($0) })
         }
+        .alert(text.discardTitle, isPresented: $session.confirmingDiscard) {
+            Button(text.discardConfirm, role: .destructive) { session.discard() }
+            Button(text.discardCancel, role: .cancel) {}
+        }
         .onChange(of: model.statusLine) { line in
             if let line { Announcer.announce(line) }
         }
@@ -148,7 +169,10 @@ struct ThumbsSheetView: View {
     private func preview(_ model: ThumbsSheetModel, _ look: ThumbsLook, maxHeight: CGFloat) -> some View {
         ZStack(alignment: .topTrailing) {
             Group {
-                if model.hasImage, let image = session.preview {
+                if model.hasImage, session.previewLoading {
+                    // Decoding off the main thread.
+                    ProgressView().tint(look.muted)
+                } else if model.hasImage, let image = session.preview {
                     Button { session.openMarkup() } label: {
                         Image(uiImage: image)
                             .resizable()
@@ -213,8 +237,16 @@ struct ThumbsSheetView: View {
     private func tools(_ model: ThumbsSheetModel, _ look: ThumbsLook) -> some View {
         AdaptiveRow(vertical: typeSize.isAccessibilitySize) {
             if model.showsMarkup {
-                Button { session.openMarkup() } label: { Label(text.markup, systemImage: "pencil.tip") }
-                    .buttonStyle(NeonButtonStyle(color: look.positive, on: false, look: look))
+                Button { session.openMarkup() } label: {
+                    if session.preparingMarkup {
+                        ProgressView().tint(look.positive)
+                    } else {
+                        Label(text.markup, systemImage: "pencil.tip")
+                    }
+                }
+                .buttonStyle(NeonButtonStyle(color: look.positive, on: false, look: look))
+                .accessibilityLabel(text.markup)
+                .disabled(session.preparingMarkup)
             }
             if model.showsRecord {
                 Button { session.record() } label: { Label(text.record, systemImage: "record.circle") }

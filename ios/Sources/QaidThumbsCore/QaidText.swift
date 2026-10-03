@@ -57,6 +57,13 @@ public struct QaidText: Equatable, Sendable {
     public var errorServer: String
     public var errorOffline: String
 
+    // New in 0.3.0, named as on Android: the editor's Use failing, and leaving a draft.
+    /// Under the markup editor when Use couldn't flatten the marks; the editor stays open.
+    public var markupFailed: String
+    public var discardTitle: String
+    public var discardConfirm: String
+    public var discardCancel: String
+
     public init(
         title: String = "Send feedback",
         subtitle: String = "to the {app} team",
@@ -103,7 +110,11 @@ public struct QaidText: Equatable, Sendable {
         errorQuota: String = "Feedback is full for this month. Please try again later.",
         errorTooLarge: String = "The recording is too long to send. Try a shorter one.",
         errorServer: String = "The feedback service is having trouble.",
-        errorOffline: String = "You seem to be offline."
+        errorOffline: String = "You seem to be offline.",
+        markupFailed: String = "Couldn't add the marks. Try Use again.",
+        discardTitle: String = "Discard this feedback?",
+        discardConfirm: String = "Discard",
+        discardCancel: String = "Keep editing"
     ) {
         self.title = title
         self.subtitle = subtitle
@@ -151,6 +162,10 @@ public struct QaidText: Equatable, Sendable {
         self.errorTooLarge = errorTooLarge
         self.errorServer = errorServer
         self.errorOffline = errorOffline
+        self.markupFailed = markupFailed
+        self.discardTitle = discardTitle
+        self.discardConfirm = discardConfirm
+        self.discardCancel = discardCancel
     }
 
     /// `subtitle` with `{app}` filled in.

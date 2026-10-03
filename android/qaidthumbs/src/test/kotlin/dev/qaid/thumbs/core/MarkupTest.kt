@@ -25,6 +25,18 @@ class MarkupColorsTest {
         assertNull(MarkupColors.parse(""))
     }
 
+    /** iOS reads `#rrggbbaa`; a palette shared between the two apps must mean the same here. */
+    @Test fun parsesHexWithAlphaLikeIos() {
+        assertEquals(0x80FF0066.toInt(), MarkupColors.parse("#ff006680"))
+        assertEquals(0xFF112233.toInt(), MarkupColors.parse("#112233FF"))
+        assertEquals(0x00000000, MarkupColors.parse("#00000000"))
+        assertNull(MarkupColors.parse("#ff00668"))
+        assertNull(MarkupColors.parse("#ff0066zz"))
+        // A sign is not a hex digit, though toInt(16) would take it.
+        assertNull(MarkupColors.parse("-fffff"))
+        assertEquals(listOf(0x80FF0066.toInt()), MarkupColors.palette(listOf("#ff006680")))
+    }
+
     @Test fun paletteDropsWhatItCannotReadAndFallsBack() {
         assertEquals(listOf(RED), MarkupColors.palette(listOf("#ff0066", "nope")))
         assertEquals(QaidThumbsConfig.DEFAULT_PALETTE.size, MarkupColors.palette(listOf("nope")).size)

@@ -20,6 +20,12 @@ import UIKit
 public enum QaidThumbs {
     public private(set) static var configuration: QaidThumbsConfiguration?
     static var coordinator: FeedbackCoordinator?
+    /// The sheet an app shows itself with `QaidThumbsSheet`, while it is up. Weak, so a
+    /// sheet that vanished without saying so can't block the next report.
+    private static weak var embeddedSheet: ThumbsSession?
+
+    /// A report is in progress: from `present()`, or a `QaidThumbsSheet` on screen.
+    static var isShowingSheet: Bool { coordinator != nil || embeddedSheet != nil }
     private static let diagnostics = DiagnosticsStore.shared
 
     /// After a report is accepted, when `configuration.quests` links a quest to its kind:
@@ -53,7 +59,7 @@ public enum QaidThumbs {
             assertionFailure("QaidThumbs.configure(_:) must be called before present()")
             return
         }
-        guard coordinator == nil, !ScreenRecorder.shared.isRecording else { return }
+        guard !isShowingSheet, !ScreenRecorder.shared.isRecording else { return }
         let coordinator = FeedbackCoordinator(config: configuration, screen: screen ?? diagnostics.screen)
         self.coordinator = coordinator
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
@@ -63,6 +69,14 @@ public enum QaidThumbs {
 
     static func finished(_ finished: FeedbackCoordinator) {
         if coordinator === finished { coordinator = nil }
+    }
+
+    static func sheetOpened(_ session: ThumbsSession) {
+        embeddedSheet = session
+    }
+
+    static func sheetClosed(_ session: ThumbsSession) {
+        if embeddedSheet === session { embeddedSheet = nil }
     }
 
     /// The app's windows as `present()` captures them, sensitive views blacked out when

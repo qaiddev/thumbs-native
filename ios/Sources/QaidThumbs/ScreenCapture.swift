@@ -52,10 +52,13 @@ enum ScreenCapture {
         return "data:image/jpeg;base64," + data.base64EncodedString()
     }
 
-    static func image(fromDataURL dataURL: String) -> UIImage? {
+    /// Decoded and prepared for display, so drawing it later costs the main thread nothing.
+    /// Any thread: the sheet calls it from a detached task.
+    nonisolated static func image(fromDataURL dataURL: String) -> UIImage? {
         guard let comma = dataURL.firstIndex(of: ",") else { return nil }
-        guard let data = Data(base64Encoded: String(dataURL[dataURL.index(after: comma)...])) else { return nil }
-        return UIImage(data: data)
+        guard let data = Data(base64Encoded: String(dataURL[dataURL.index(after: comma)...])),
+              let image = UIImage(data: data) else { return nil }
+        return image.preparingForDisplay() ?? image
     }
 }
 #endif

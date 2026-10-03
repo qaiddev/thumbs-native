@@ -19,8 +19,21 @@ final class TextTests: XCTestCase {
                      text.sending, text.sent, text.queued, text.retry, text.noScreenshot, text.removeScreenshot,
                      text.screenRecording, text.markupTitle, text.markupHelp, text.markupUse, text.markupBack,
                      text.markupRectangle, text.markupArrow, text.markupPen, text.markupRedact, text.markupUndo,
-                     text.markupClear, text.markupColor, text.attachScreenshot, text.recordInstead]
+                     text.markupClear, text.markupColor, text.attachScreenshot, text.recordInstead,
+                     text.markupFailed, text.discardTitle, text.discardConfirm, text.discardCancel]
         XCTAssertTrue(drawn.allSatisfy { !$0.isEmpty })
+    }
+
+    /// Same keys and words as Android's QaidText, so one translation table serves both.
+    func testTheEditorFailureAndDiscardWordsMatchAndroid() {
+        let text = QaidText()
+        XCTAssertEqual(text.markupFailed, "Couldn't add the marks. Try Use again.")
+        XCTAssertEqual(text.discardTitle, "Discard this feedback?")
+        XCTAssertEqual(text.discardConfirm, "Discard")
+        XCTAssertEqual(text.discardCancel, "Keep editing")
+        let french = QaidText(markupFailed: "a", discardTitle: "b", discardConfirm: "c", discardCancel: "d")
+        XCTAssertEqual([french.markupFailed, french.discardTitle, french.discardConfirm, french.discardCancel],
+                       ["a", "b", "c", "d"])
     }
 
     func testOverridesReachTheSheetAndTheErrors() {

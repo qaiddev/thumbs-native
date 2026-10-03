@@ -75,13 +75,26 @@ package enum MarkupRenderer {
         return "data:image/jpeg;base64," + (data as Data).base64EncodedString()
     }
 
-    /// The editor's Use: the marks flattened onto the screenshot it was opened with, as
-    /// a JPEG data URL. nil when there is nothing to keep (no marks) or the image can't
-    /// be read, and the sheet keeps the screenshot it had.
-    package static func apply(_ document: MarkupDocument, to dataUrl: String) -> String? {
+    /// The editor's Use: the finished marks flattened onto the screenshot it was opened
+    /// with, as a JPEG data URL. A failure is kept apart from "no marks": the editor closes
+    /// on `.unchanged` and `.marked`, and stays open, marks and all, on `.failed` — it used
+    /// to read both as nil and close as if Back had been tapped, dropping a redact. Pure and
+    /// thread-safe, so the editor runs it off the main thread.
+    package static func use(_ document: MarkupDocument, on dataUrl: String) -> MarkupUse {
         let commands = document.outputCommands
-        guard !commands.isEmpty, let image = decode(dataUrl: dataUrl),
-              let flat = flatten(image, commands: commands) else { return nil }
-        return jpegDataURL(flat)
+        guard !commands.isEmpty else { return .unchanged }
+        guard let image = decode(dataUrl: dataUrl), let flat = flatten(image, commands: commands),
+              let url = jpegDataURL(flat) else { return .failed }
+        return .marked(url)
     }
+}
+
+/// What the markup editor's Use came to.
+package enum MarkupUse: Equatable, Sendable {
+    /// No marks: the screenshot stays as it was.
+    case unchanged
+    /// The marked-up screenshot, a JPEG data URL.
+    case marked(String)
+    /// The marks couldn't be flattened (the image unreadable, or ImageIO refusing it).
+    case failed
 }

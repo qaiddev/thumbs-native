@@ -137,6 +137,34 @@ class ThumbsSheetModelTest {
         assertTrue(busy.inputsEnabled)
     }
 
+    /** As on iOS: Remove, Mark up and Record wait for the send, so it can't go twice or lose its result. */
+    @Test fun toolsWaitWhileASendRuns() {
+        assertTrue(sheet().toolsEnabled)
+        val busy = sheet().toggle(FeedbackKind.UP).sending()
+        assertFalse(busy.toolsEnabled)
+        assertSame(busy, busy.removingImage())
+        assertSame(busy, busy.withMarkup(MARKED))
+        assertEquals(PNG, busy.image)
+        val failed = busy.finish(SendOutcome.Failed(QaidError.Server(500)))
+        assertTrue(failed.toolsEnabled)
+        assertEquals(SheetAttachment.None, failed.removingImage().attachment)
+    }
+
+    @Test fun aDraftIsProtectedFromBack() {
+        val m = sheet()
+        assertFalse("an untouched screenshot can go", m.protectsDraft)
+        assertFalse(m.withMessage("  ").protectsDraft)
+        assertTrue(m.toggle(FeedbackKind.UP).protectsDraft)
+        assertTrue(m.withMessage("words").protectsDraft)
+        assertTrue("a marked-up screenshot", m.withMarkup(MARKED).protectsDraft)
+        assertTrue("a removed screenshot", m.removingImage().protectsDraft)
+        assertTrue("a recording", m.afterRecording(video).protectsDraft)
+        assertTrue("a send running", sheet(SheetAttachment.None).toggle(FeedbackKind.UP).sending().protectsDraft)
+        assertFalse("nothing left to lose once sent", m.withMarkup(MARKED).sending().finish(SendOutcome.Sent).protectsDraft)
+        assertFalse(m.afterRecording(video).sending().finish(SendOutcome.Queued).protectsDraft)
+        assertFalse(sheet(SheetAttachment.None).protectsDraft)
+    }
+
     @Test fun sentIsFinalAndSendBecomesDone() {
         val sent = sheet().toggle(FeedbackKind.UP).withMessage("x").sending().finish(SendOutcome.Sent)
         assertTrue(sent.finished)

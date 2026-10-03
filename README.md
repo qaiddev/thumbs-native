@@ -1,172 +1,142 @@
-# qaid feedback for iOS and Android
+# qaid thumbs for iOS and Android
 
-[![coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fqaiddev%2Fqaid-native%2Fprod%2Fcoverage-badge.json)](#coverage)
+[![coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fqaiddev%2Fthumbs-native%2Fprod%2Fcoverage-badge.json)](#coverage)
 
-Thumbs feedback for native apps, sent to your [qaid.dev](https://qaid.dev) project's inbox. It does what
-[`@qaiddev/thumbs-embed`](https://github.com/qaiddev/thumbs-embed) does on the web: thumbs up or down, a
-screenshot the person can mark up, a message, and an optional screen recording.
+Thumbs feedback for native apps, sent to your [qaid.dev](https://qaid.dev) project's inbox, drawn with
+real SwiftUI and Jetpack Compose views. It does what [`@qaiddev/thumbs-embed`](https://github.com/qaiddev/thumbs-embed)
+does on the web: thumbs up or down, a screenshot the person marks up, a message, and an optional screen
+recording. Its sister SDK, [quests-native](https://github.com/qaiddev/quests-native), draws qaid quests.
 
 | Platform | Install | Needs |
 | --- | --- | --- |
-| iOS | Swift Package Manager: `https://github.com/qaiddev/qaid-native`, product `QaidFeedback` | iOS 15+ |
-| Android | `implementation("dev.qaid:feedback:0.2.0")` from Maven Central | minSdk 26, compileSdk 35+ |
+| iOS | Swift Package Manager: `https://github.com/qaiddev/thumbs-native`, product `QaidThumbs` | iOS 15+ |
+| Android | `implementation("dev.qaid:thumbs:0.3.0")` from Maven Central | minSdk 26, compileSdk 35+, Compose compiler plugin |
 
-You need your project's **embed key**: in qaid, open the project, then **Settings** → **API Keys**. It is
-the same key the web embed uses, and it is safe to ship in an app.
+You need your project's **embed key**: in qaid, open the project, then **Settings** → **API Keys**. It is the
+same key the web embed uses, and it is safe to ship in an app.
+
+Integration guide: https://qaid.dev/guides/thumbs-native. Exact API: [`ios/NOTES.md`](ios/NOTES.md),
+[`android/NOTES.md`](android/NOTES.md).
 
 ## Set up
 
-### iOS
-
 ```swift
-import QaidFeedback
+import QaidThumbs
 
 // Once, at launch
-QaidFeedback.configure(QaidConfiguration(
-    apiKey: "YOUR_EMBED_KEY",
-    appName: "My App"
-))
+QaidThumbs.configure(QaidThumbsConfiguration(apiKey: "YOUR_EMBED_KEY", appName: "My App"))
 
 // From a "Send feedback" button
-QaidFeedback.present(screen: "Settings")
+QaidThumbs.present(screen: "Settings")
 ```
-
-### Android
 
 ```kotlin
-import dev.qaid.feedback.QaidFeedback
-import dev.qaid.feedback.core.QaidConfig
+import dev.qaid.thumbs.QaidThumbs
+import dev.qaid.thumbs.core.QaidThumbsConfig
 
 // Once, in Application.onCreate. The context lets reports saved while offline send at launch.
-QaidFeedback.configure(this, QaidConfig(
-    apiKey = "YOUR_EMBED_KEY",
-    appName = "My App",
-))
+QaidThumbs.configure(this, QaidThumbsConfig(apiKey = "YOUR_EMBED_KEY", appName = "My App"))
 
 // From a "Send feedback" button
-QaidFeedback.present(activity, screen = "Settings")
+QaidThumbs.present(activity, screen = "Settings")
 ```
 
-`screen` says where the person was. It is stored with the report.
+A SwiftUI app that presents its own sheets can use `QaidThumbsSheet` with
+`QaidThumbs.captureScreenshot()`; it has no Record button, since recording needs the sheet off screen.
+
+## What the person sees
+
+The SDK screenshots the app first, so the sheet is never in it. The sheet shows the screenshot, thumbs, a
+message box and Send. **Mark up** opens a native editor with box, arrow, pen and redact tools, undo and
+clear. Redact paints an opaque black box onto the image's own pixels before anything leaves the phone.
+**Record screen** closes the sheet, records the app (ReplayKit / MediaProjection), and brings the sheet
+back with the clip. Recordings need a Pro plan.
 
 ## What a report carries
 
-1. The screenshot, after the person marks it up, or a screen recording. Recordings need a Pro plan.
-2. Thumbs and the message.
-3. The app name, version and build, the device, OS version and locale.
-4. Who sent it and your own values, if you set them:
-
-   ```swift
-   QaidFeedback.setUser(id: "u_42", email: "sam@example.com", name: "Sam")
-   QaidFeedback.setMetadata(key: "plan", value: "pro")
-   ```
-
-   Up to 30 keys. Keys are cut at 64 characters and values at 500.
-5. Recent warnings and errors from the app's own log (`OSLogStore` on iOS, `logcat` on Android), plus anything you
-   add with `QaidFeedback.log("Sync failed", level: .error)`. The last 50 are kept. Turn the system log off
-   with `captureLogs: false`.
-6. Failed network calls, if you report them. On iOS call `QaidFeedback.record(request:response:error:)` where
-   your requests finish. On Android add `QaidFeedback.networkInterceptor()` to your `OkHttpClient`. Only the
-   method, the URL without its query string, and the status are kept. Bodies and headers are never recorded.
-
-Console lines and failed calls need the project's console capture feature, as on the web.
+1. The marked-up screenshot or the recording, thumbs and the message.
+2. The app name, version and build, the device, OS version and locale.
+3. Who sent it and your own values: `QaidThumbs.setUser(id:email:name:)`, `QaidThumbs.setMetadata(key:value:)`.
+   Up to 30 keys; keys are cut at 64 characters and values at 500.
+4. Recent warnings and errors from the app's own log (`OSLogStore` / `logcat`) plus your
+   `QaidThumbs.log(...)` lines. The last 50 are kept. `captureLogs: false` turns the system log off.
+5. Failed network calls you report: `QaidThumbs.record(request:response:error:)` on iOS,
+   `QaidThumbs.networkInterceptor()` on an `OkHttpClient` on Android. Only the method, the URL without its
+   query string or credentials, and the status are kept.
 
 ## Hide private views
 
-Mark a view and it is blacked out in screenshots and covered during recordings:
-
-```swift
-QaidFeedback.markSensitive(cardNumberField)   // or: cardNumberField.qaidSensitive = true
-```
-
-```kotlin
-QaidFeedback.markSensitive(cardNumberField)   // or: cardNumberField.qaidSensitive = true
-```
-
-Password fields are covered without being marked. `maskSensitiveViews: false` turns all of it off.
+`QaidThumbs.markSensitive(view)` or `view.qaidSensitive = true` blacks a view out in screenshots and
+covers it during recordings. Password fields are covered without being marked. `maskSensitiveViews: false`
+turns all masking off.
 
 ## Shake to report
 
-```swift
-QaidFeedback.enableShakeToReport()
-QaidFeedback.setScreen("Settings")      // what a shake report names as the screen
-```
-
-```kotlin
-QaidFeedback.enableShakeToReport(application)
-QaidFeedback.setScreen("Settings")
-```
-
-## Your own words
-
-Every string the sheet shows comes from `QaidText`, so you can pass your own translations:
-
-```swift
-QaidConfiguration(apiKey: "…", appName: "Mi App",
-                  text: QaidText(title: "Enviar comentarios", send: "Enviar"))
-```
+`QaidThumbs.enableShakeToReport()` (iOS) or `QaidThumbs.enableShakeToReport(application)` (Android), with
+`QaidThumbs.setScreen("Settings")` to name the screen a shake report comes from.
 
 ## Quests after a report
 
-Link a quest to a thumb or to recordings and it opens after the report is sent:
+Link a quest to a thumb or to recordings with `quests: QaidQuestLinks(up:down:video:)`. After the report
+is accepted, the sheet closes and `QaidThumbs.onLinkedQuest` gets the quest id and the new feedback id.
+Open it with quests-native, so the answers are tied to the report:
 
 ```swift
-QaidConfiguration(apiKey: "…", appName: "My App",
-                  quests: QaidQuestLinks(up: "QUEST_ID", down: "QUEST_ID", video: "QUEST_ID"))
+QaidThumbs.onLinkedQuest = { link in
+    QaidQuests.present(questId: link.questId, metadata: ["feedbackId": link.feedbackId])
+}
 ```
 
 ## Offline
 
-If a send fails because the phone is offline or qaid is down, the report is saved on the device and sent
-later: at the next launch, when the app comes back to the front, or when the network returns. Up to 10
-reports and 100 MB are kept for 7 days.
+A report that fails because the phone is offline or qaid is down is saved on the device and sent later:
+at the next launch, when the app comes back to the front, or when the network returns. Up to 10 reports and
+100 MB are kept for 7 days, outside device backups.
+
+## Your own words
+
+Every string the sheet and editor show comes from `QaidText`, so you can pass your own translations.
 
 ## Domain Restriction
 
-If your project has a Domain Restriction, the app must pass it.
+With no `pageUrl`, reports are sent as `app://<bundle id>`, which qaid reads back to front:
+`com.example.myapp` passes a restriction of `example.com`. Otherwise set `pageUrl` to an address on the
+restricted domain.
 
-1. **No `pageUrl`** (the default): reports are sent as `app://<bundle id>`. qaid reads the bundle id back to
-   front, so `com.example.myapp` passes a restriction of `example.com`.
-2. **`pageUrl` set**: it must be on the restricted domain, for example `https://example.com/app/ios`.
+## Upgrading from 0.2 (`QaidFeedback`)
 
-## How it works
-
-1. The app captures its own window. That is a snapshot on iOS and PixelCopy on Android. Views you marked are
-   blacked out before anything else sees the image.
-2. It opens `https://qaid.dev/native/annotate` in a web view. That page runs thumbs-embed's annotation editor
-   and makes no network calls of its own.
-3. The page hands back the marked-up image, thumbs and message over a small bridge. Messages from any other
-   origin or frame are dropped, and navigation away from the page is blocked.
-4. The app posts the report to `/api/feedback`, or to `/api/feedback/video` for a recording. The API key
-   reaches the page only when a linked quest runs, because the quest saves its own answers.
-5. If the page can't load, a native form takes over without markup tools, so feedback still sends.
+0.3.0 renames `QaidFeedback` → `QaidThumbs`, `QaidConfiguration`/`QaidConfig` →
+`QaidThumbsConfiguration`/`QaidThumbsConfig`, the Swift product to `QaidThumbs` and the artifact to
+`dev.qaid:thumbs`. The web-view sheet and `annotateURL` are gone. The visitor id and offline queue keep
+their 0.2 names on disk, so queued reports still send after the upgrade.
 
 ## Develop
 
 ```sh
-swift test                                                   # iOS core, from the repo root
-xcodebuild -scheme QaidFeedback -destination 'generic/platform=iOS Simulator' build
-cd android && ./gradlew --no-daemon :qaidfeedback:testDebugUnitTest
+/usr/bin/swift test                                                     # iOS core, from the repo root
+xcodebuild -scheme QaidThumbs -destination 'generic/platform=iOS Simulator' build
+cd android && ./gradlew --no-daemon :qaidthumbs:testDebugUnitTest       # JVM + Robolectric
 ```
 
-Release: bump `QaidSDK.version` (iOS) and `QaidSdk.VERSION` (Android) and the coordinates in
-`android/build.gradle.kts`. Tag `x.y.z`; the tag is the Swift release. Then publish the AAR from `android/`
-with `./gradlew --no-daemon :qaidfeedback:publishAndReleaseToMavenCentral`. It needs `mavenCentralUsername`,
+Release: bump `QaidThumbsSDK.version`, `QaidThumbsSdk.VERSION` and the coordinates in
+`android/build.gradle.kts`; tag `x.y.z` (the tag is the Swift release); then from `android/` run
+`./gradlew --no-daemon :qaidthumbs:publishAndReleaseToMavenCentral` with `mavenCentralUsername`,
 `mavenCentralPassword` and `signingInMemoryKey` in `~/.gradle/gradle.properties`.
 
 ## Coverage
 
 ```sh
 scripts/coverage.sh            # both platforms, then coverage-badge.json
-scripts/coverage-ios.sh        # swift test + llvm-cov, QaidFeedbackCore only
-scripts/coverage-android.sh    # debug unit tests + Kover
+scripts/coverage-ios.sh        # swift test + llvm-cov, QaidThumbsCore only
+scripts/coverage-android.sh    # unit + Robolectric tests, Kover
 ```
 
-The gate covers the pure code each platform tests without a device: `QaidFeedbackCore` on iOS
-(lines, functions and regions, since Swift counts no branches) and `dev.qaid.feedback.core` on Android
-(lines and branches). Each script fails when its numbers drop under the gate. The UIKit and Android
-framework code is not gated; its decisions live in the core so they are tested there. The badge
-shows the lower of the two platforms' line coverage; commit `coverage-badge.json` after a run.
+The gate covers the pure code each platform tests without a device: `QaidThumbsCore` on iOS (lines,
+functions and regions, since Swift counts no branches) and `dev.qaid.thumbs.core` on Android (lines and
+branches). The sheet and markup editor keep their state and geometry in that core, so their decisions are
+tested there; Android also runs Robolectric tests of the sheet, the editor and `present`, reported but not
+gated. Recording, capture and shake need a device. The badge shows the lower of the two platforms' gated
+line coverage; commit `coverage-badge.json` after a run.
 
 ## License
 

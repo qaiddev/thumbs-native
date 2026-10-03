@@ -89,6 +89,10 @@ class QaidTextTest {
         assertEquals("Circle what matters, or black out anything private. Use keeps the marks; Back drops them.", text.markupHelp)
         assertEquals(listOf("Rectangle", "Arrow", "Pen", "Redact", "Undo", "Clear"),
             listOf(text.markupRectangle, text.markupArrow, text.markupPen, text.markupRedact, text.markupUndo, text.markupClear))
+        // Same keys and words as iOS.
+        assertEquals("Couldn't add the marks. Try Use again.", text.markupFailed)
+        assertEquals(listOf("Discard this feedback?", "Discard", "Keep editing"),
+            listOf(text.discardTitle, text.discardConfirm, text.discardCancel))
     }
 
     @Test fun appNameIsSubstituted() {

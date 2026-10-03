@@ -15,17 +15,29 @@ import java.io.ByteArrayOutputStream
  * It replays the same [MarkupCommand]s the editor draws on screen.
  */
 internal object MarkupRenderer {
-    /** The marked-up screenshot as `data:image/jpeg;base64,…`, or null when it can't be decoded. */
+    /**
+     * The marked-up screenshot as `data:image/jpeg;base64,…`, or null when it can't be decoded,
+     * copied (out of memory: `copy` returns null) or encoded. The editor then stays open and says so.
+     */
     fun render(dataUrl: String, commands: List<MarkupCommand>): String? {
         val decoded = ScreenCapture.decode(dataUrl) ?: return null
-        val bitmap = decoded.copy(Bitmap.Config.ARGB_8888, true)
+        val bitmap: Bitmap? = try {
+            decoded.copy(Bitmap.Config.ARGB_8888, true)
+        } catch (_: OutOfMemoryError) {
+            null
+        }
         if (bitmap !== decoded) decoded.recycle()
-        draw(Canvas(bitmap), commands)
-        val out = ByteArrayOutputStream()
-        val ok = bitmap.compress(Bitmap.CompressFormat.JPEG, MarkupGeometry.JPEG_QUALITY, out)
-        bitmap.recycle()
-        if (!ok) return null
-        return "data:image/jpeg;base64," + Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+        if (bitmap == null) return null
+        return try {
+            draw(Canvas(bitmap), commands)
+            val out = ByteArrayOutputStream()
+            if (!bitmap.compress(Bitmap.CompressFormat.JPEG, MarkupGeometry.JPEG_QUALITY, out)) return null
+            "data:image/jpeg;base64," + Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+        } catch (_: OutOfMemoryError) {
+            null
+        } finally {
+            bitmap.recycle()
+        }
     }
 
     fun draw(canvas: Canvas, commands: List<MarkupCommand>) {

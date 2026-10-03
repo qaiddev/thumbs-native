@@ -31,12 +31,14 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
@@ -47,6 +49,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -69,14 +72,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.LifecycleOwner
 import dev.qaid.thumbs.core.FeedbackKind
+import dev.qaid.thumbs.core.MarkupCommand
+import dev.qaid.thumbs.core.MarkupDocument
 import dev.qaid.thumbs.core.PrimaryAction
 import dev.qaid.thumbs.core.StatusTone
 import dev.qaid.thumbs.core.ThumbsSheetModel
 import dev.qaid.thumbs.core.ThumbsSubmission
+import dev.qaid.thumbs.internal.MarkupRenderer
 import dev.qaid.thumbs.internal.ScreenCapture
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -92,10 +95,81 @@ internal interface ThumbsSheetActions {
     fun onClose()
 }
 
-/** The sheet's state: the model, and whether the markup editor is over it. Main thread. */
+/**
+ * The sheet's state: the model, the markup editor over it and its marks, and the discard
+ * question. The session holds it, not the window, so all of it outlives a rotation or a trip
+ * out to record. Main thread.
+ */
 internal class ThumbsSheetState(initial: ThumbsSheetModel) {
     var model: ThumbsSheetModel by mutableStateOf(initial)
+
+    /** The markup editor is open. */
     var editing: Boolean by mutableStateOf(false)
+        private set
+
+    /** The editor's marks so far; null until the first one. */
+    var document: MarkupDocument? by mutableStateOf(null)
+
+    /** Use is flattening the marks: Back waits, so it can't race the result. */
+    var rendering: Boolean by mutableStateOf(false)
+        private set
+
+    /** Why the last Use failed; the editor stays open with the marks. */
+    var markupError: String? by mutableStateOf(null)
+        private set
+
+    /** "Discard this feedback?" is up. */
+    var confirmingDiscard: Boolean by mutableStateOf(false)
+
+    fun openEditor() {
+        if (editing || !model.showsMarkup || !model.toolsEnabled) return
+        document = null
+        markupError = null
+        editing = true
+    }
+
+    /** Back, or Use with no marks: the screenshot as it was. Ignored while Use renders. */
+    fun closeEditor() {
+        if (rendering) return
+        editing = false
+        document = null
+        markupError = null
+    }
+
+    /** Use pressed: false when it already is, or the editor has gone. */
+    fun startRendering(): Boolean {
+        if (rendering || !editing) return false
+        rendering = true
+        markupError = null
+        return true
+    }
+
+    /** Use's result: the marked-up screenshot, or null when it couldn't be made. */
+    fun markupRendered(dataUrl: String?) {
+        if (!rendering) return
+        rendering = false
+        if (!editing) return
+        if (dataUrl == null) {
+            markupError = model.text.markupFailed
+            return
+        }
+        model = model.withMarkup(dataUrl)
+        closeEditor()
+    }
+
+    /** The editor left the screen mid-render (a rotation): the marks stay for another Use. */
+    fun renderingCancelled() {
+        rendering = false
+    }
+
+    /** System Back: the editor first, then the sheet — asking first when there is a draft. */
+    fun back(close: () -> Unit) {
+        when {
+            editing -> closeEditor()
+            model.protectsDraft -> confirmingDiscard = true
+            else -> close()
+        }
+    }
 }
 
 /** Test tags for the sheet's and the editor's controls. */
@@ -120,13 +194,18 @@ internal object ThumbsTags {
     const val CLEAR = "qaid-markup-clear"
     const val BACK = "qaid-markup-back"
     const val USE = "qaid-markup-use"
+    const val MARKUP_ERROR = "qaid-markup-error"
+    const val DISCARD_CONFIRM = "qaid-thumbs-discard-confirm"
+    const val DISCARD_CANCEL = "qaid-thumbs-discard-cancel"
     fun tool(name: String) = "qaid-markup-tool-$name"
     fun color(index: Int) = "qaid-markup-color-$index"
 }
 
 /**
  * The sheet, full screen in its own dialog window over the activity, so it works from any
- * Activity, Compose or not. Back closes the markup editor when it is open, else the sheet.
+ * Activity, Compose or not. Back closes the markup editor when it is open, else the sheet,
+ * asking first when that would lose a draft. The window dies with its activity; the session
+ * (which watches every activity through the Application) puts a new one up after a rotation.
  */
 internal class ThumbsSheetDialog(
     activity: Activity,
@@ -137,15 +216,6 @@ internal class ThumbsSheetDialog(
     activity,
     if (dark) android.R.style.Theme_Material_NoActionBar else android.R.style.Theme_Material_Light_NoActionBar,
 ) {
-    private val observer = LifecycleEventObserver { _, event ->
-        // The dialog can't outlive its activity (a rotation would leak its window): the report goes too.
-        if (event == Lifecycle.Event.ON_DESTROY && isShowing) {
-            dismiss()
-            actions.onClose()
-        }
-    }
-    private val lifecycleOwner = activity as? LifecycleOwner
-
     init {
         val colors = ThumbsColors.of(dark, state.model.accent(dark))
         val view = ComposeView(context).apply { setContent { ThumbsSheet(state, dark, actions) } }
@@ -162,16 +232,20 @@ internal class ThumbsSheetDialog(
                 isAppearanceLightNavigationBars = !dark
             }
         }
-        onBackPressedDispatcher.addCallback(this) {
-            if (state.editing) state.editing = false else actions.onClose()
-        }
-        lifecycleOwner?.lifecycle?.addObserver(observer)
-        setOnDismissListener { lifecycleOwner?.lifecycle?.removeObserver(observer) }
+        onBackPressedDispatcher.addCallback(this) { state.back(actions::onClose) }
     }
 }
 
+/** Use's flattening: the screenshot data URL and the marks in, the marked-up data URL (or null) out. */
+internal typealias MarkupRender = (String, List<MarkupCommand>) -> String?
+
 @Composable
-internal fun ThumbsSheet(state: ThumbsSheetState, dark: Boolean, actions: ThumbsSheetActions) {
+internal fun ThumbsSheet(
+    state: ThumbsSheetState,
+    dark: Boolean,
+    actions: ThumbsSheetActions,
+    render: MarkupRender = MarkupRenderer::render,
+) {
     val model = state.model
     val colors = ThumbsColors.of(dark, model.accent(dark))
     val dataUrl = model.image
@@ -185,23 +259,40 @@ internal fun ThumbsSheet(state: ThumbsSheetState, dark: Boolean, actions: Thumbs
             Box(Modifier.fillMaxSize().background(colors.bg)) {
                 val image = bitmap
                 if (state.editing && dataUrl != null && image != null) {
-                    MarkupEditor(
-                        dataUrl = dataUrl,
-                        image = image,
-                        model = model,
-                        colors = colors,
-                        onUse = { marked ->
-                            if (marked != null) state.model = state.model.withMarkup(marked)
-                            state.editing = false
-                        },
-                        onBack = { state.editing = false },
-                    )
+                    MarkupEditor(dataUrl = dataUrl, image = image, state = state, colors = colors, render = render)
                 } else {
                     SheetForm(state, image, colors, actions)
                 }
             }
+            if (state.confirmingDiscard) DiscardDialog(state, colors, actions)
         }
     }
+}
+
+/** Back with a draft: discard it, or go back to it. */
+@Composable
+private fun DiscardDialog(state: ThumbsSheetState, colors: ThumbsColors, actions: ThumbsSheetActions) {
+    val text = state.model.text
+    AlertDialog(
+        onDismissRequest = { state.confirmingDiscard = false },
+        containerColor = colors.surface,
+        title = { Text(text.discardTitle, color = colors.ink, fontWeight = FontWeight.Bold) },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    state.confirmingDiscard = false
+                    actions.onClose()
+                },
+                modifier = Modifier.defaultMinSize(minHeight = MinTarget).testTag(ThumbsTags.DISCARD_CONFIRM),
+            ) { Text(text.discardConfirm, color = colors.negative, fontWeight = FontWeight.SemiBold) }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = { state.confirmingDiscard = false },
+                modifier = Modifier.defaultMinSize(minHeight = MinTarget).testTag(ThumbsTags.DISCARD_CANCEL),
+            ) { Text(text.discardCancel, color = colors.positive, fontWeight = FontWeight.SemiBold) }
+        },
+    )
 }
 
 @Composable
@@ -222,19 +313,23 @@ private fun SheetForm(state: ThumbsSheetState, image: ImageBitmap?, colors: Thum
         ) {
             Preview(state, image, colors)
             if (model.showsTools) {
+                // Wait while a send runs, as on iOS: a trip out to record would lose its result.
+                val enabled = model.toolsEnabled
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (model.showsMarkup) {
                         NeonPill(
-                            model.text.markup, colors.positive, colors, icon = ThumbsIcons.pencil,
+                            model.text.markup, colors.positive, colors, icon = ThumbsIcons.pencil, enabled = enabled,
                             modifier = Modifier.weight(1f).testTag(ThumbsTags.MARKUP)
-                                .clickable(role = Role.Button) { state.editing = true },
+                                .clickable(enabled = enabled, role = Role.Button) { state.openEditor() },
                         )
                     }
                     if (model.showsRecord) {
                         NeonPill(
-                            model.text.record, colors.negative, colors, icon = ThumbsIcons.dot,
+                            model.text.record, colors.negative, colors, icon = ThumbsIcons.dot, enabled = enabled,
                             modifier = Modifier.weight(1f).testTag(ThumbsTags.RECORD)
-                                .clickable(role = Role.Button) { actions.onRecord(state.model) },
+                                .clickable(enabled = enabled, role = Role.Button) {
+                                    if (state.model.toolsEnabled) actions.onRecord(state.model)
+                                },
                         )
                     }
                 }
@@ -310,9 +405,11 @@ private fun Preview(state: ThumbsSheetState, image: ImageBitmap?, colors: Thumbs
                     Image(
                         image, contentDescription = model.text.markupTitle, contentScale = ContentScale.Fit,
                         modifier = Modifier.clip(RoundedCornerShape(10.dp)).testTag(ThumbsTags.IMAGE)
-                            .clickable(enabled = model.showsMarkup, onClickLabel = model.text.markup, role = Role.Image) {
-                                state.editing = true
-                            },
+                            .clickable(
+                                enabled = model.showsMarkup && model.toolsEnabled,
+                                onClickLabel = model.text.markup,
+                                role = Role.Image,
+                            ) { state.openEditor() },
                     )
                 } else {
                     Spacer(Modifier.size(1.dp).testTag(ThumbsTags.IMAGE))
@@ -320,7 +417,10 @@ private fun Preview(state: ThumbsSheetState, image: ImageBitmap?, colors: Thumbs
                 if (model.showsRemove) {
                     Box(
                         Modifier.align(Alignment.TopEnd).size(MinTarget).testTag(ThumbsTags.REMOVE)
-                            .clickable(role = Role.Button) { state.model = state.model.removingImage() }
+                            .alpha(if (model.toolsEnabled) 1f else 0.45f)
+                            .clickable(enabled = model.toolsEnabled, role = Role.Button) {
+                                state.model = state.model.removingImage()
+                            }
                             .semantics { contentDescription = model.text.removeScreenshot },
                         contentAlignment = Alignment.Center,
                     ) {

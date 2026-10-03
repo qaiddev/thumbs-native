@@ -31,8 +31,15 @@ import java.lang.ref.WeakReference
 
 /**
  * One feedback report from tap to sent: capture → sheet → (record → sheet) → upload, or the
- * offline queue when the network or the server is down. The draft (attachment, thumbs,
- * message) survives a trip out to record the screen.
+ * offline queue when the network or the server is down.
+ *
+ * The session, not the sheet's window, holds the report: the sheet's state (thumbs, words,
+ * screenshot, markup, a send in flight) and the recording. It watches the app's activities
+ * through the Application, so it works from a plain Activity too. A window can't outlive its
+ * activity, so when the sheet's activity goes the window goes with it — and after a rotation
+ * (or the system recreating it) the sheet comes back on the new activity as it was. Only an
+ * activity that is really finishing ends the report. After a recording the sheet goes up on
+ * whichever activity is resumed then; with none resumed it waits, draft and all, for the next.
  */
 internal class ThumbsSession(
     activity: Activity,
@@ -41,17 +48,25 @@ internal class ThumbsSession(
     private val dark: Boolean,
     private val capturer: ScreenCapturer,
     private val onFinished: (ThumbsSession) -> Unit,
-) : ThumbsSheetActions {
-    private val activityRef = WeakReference(activity)
+) : ActivityCallbacks(), ThumbsSheetActions {
+    private val application = activity.application
     private val appContext = activity.applicationContext
     private val scope = MainScope()
     private val client = FeedbackClient(appContext, config)
     private var screenshot: String? = null
     private var video: RecordedVideo? = null
-    /** The sheet as it was when the person went out to record. */
-    private var draft: ThumbsSheetModel? = null
     private var state: ThumbsSheetState? = null
     private var dialog: ThumbsSheetDialog? = null
+
+    /** The activity the person is on: the one that asked, then the last one resumed. Null while none is. */
+    private var resumed: WeakReference<Activity>? = WeakReference(activity)
+
+    /** The activity the sheet's window belongs to, while it is up. */
+    private var host: WeakReference<Activity>? = null
+
+    /** The sheet should be up, but no activity can hold it yet: it goes up on the next one resumed. */
+    private var waiting = false
+    private var recording = false
     private var sending: Job? = null
     private var finished = false
 
@@ -59,7 +74,9 @@ internal class ThumbsSession(
     private var systemLogs: Deferred<List<LogEntry>>? = null
 
     fun start() {
-        val activity = activityRef.get() ?: return finish()
+        if (finished) return
+        val activity = resumed?.get()?.takeIf { it.isUsable() } ?: return finish()
+        application.registerActivityLifecycleCallbacks(this)
         if (config.captureLogs) systemLogs = scope.async { LogcatReader.read() }
         capturer.capture(activity, config.maskSensitiveViews) { bitmap ->
             scope.launch {
@@ -71,16 +88,50 @@ internal class ThumbsSession(
         }
     }
 
+    /** The sheet, on the resumed activity — or, with none, as soon as one resumes. */
     private fun show() {
-        val activity = activityRef.get()
-        if (activity == null || activity.isFinishing || activity.isDestroyed) return finish()
-        val recorded = video?.let { SheetAttachment.Video(it.durationSec, it.sizeBytes) }
-        val model = draft?.afterRecording(recorded)
-            ?: ThumbsSheetModel.create(config, SheetAttachment.of(recorded, screenshot), Recording.canRecord(activity))
-        draft = null
-        val next = ThumbsSheetState(model)
-        state = next
-        dialog = ThumbsSheetDialog(activity, next, dark, this).also { it.show() }
+        if (finished || recording || dialog != null) return
+        val activity = resumed?.get()?.takeIf { it.isUsable() }
+        if (activity == null) {
+            waiting = true
+            return
+        }
+        waiting = false
+        val sheet = state ?: ThumbsSheetState(
+            ThumbsSheetModel.create(
+                config,
+                SheetAttachment.of(video?.let { SheetAttachment.Video(it.durationSec, it.sizeBytes) }, screenshot),
+                Recording.canRecord(activity),
+            ),
+        ).also { state = it }
+        host = WeakReference(activity)
+        dialog = ThumbsSheetDialog(activity, sheet, dark, this).also { it.show() }
+    }
+
+    private fun Activity.isUsable() = !isFinishing && !isDestroyed
+
+    /** Takes the window down; the report stays. */
+    private fun hide() {
+        dialog?.dismiss()
+        dialog = null
+        host = null
+    }
+
+    override fun onActivityResumed(activity: Activity) {
+        resumed = WeakReference(activity)
+        if (waiting) show()
+    }
+
+    override fun onActivityPaused(activity: Activity) {
+        if (resumed?.get() === activity) resumed = null
+    }
+
+    override fun onActivityDestroyed(activity: Activity) {
+        if (host?.get() !== activity) return
+        // The window can't outlive its activity. A rotation (or the system reclaiming it) brings
+        // the sheet back on the next activity resumed; an activity that is finishing ends the report.
+        hide()
+        if (activity.isFinishing && !activity.isChangingConfigurations) close() else waiting = true
     }
 
     /** The page, metadata and diagnostics as they stand at Send. */
@@ -98,7 +149,7 @@ internal class ThumbsSession(
 
     override fun onSend(submission: ThumbsSubmission) {
         val sheet = state ?: return
-        if (sending != null) return
+        if (finished || sending != null) return
         sheet.model = sheet.model.sending()
         val recorded = video
         val visitorId = client.visitorId
@@ -146,30 +197,39 @@ internal class ThumbsSession(
     }
 
     override fun onRecord(draft: ThumbsSheetModel) {
-        this.draft = draft
-        dialog?.dismiss()
-        dialog = null
-        state = null
-        val activity = activityRef.get() as? ComponentActivity ?: return show()
+        val sheet = state ?: return
+        // Never mid-send: the sheet's Record is disabled then, and this holds whatever calls it.
+        if (finished || recording || !sheet.model.showsRecord || !sheet.model.toolsEnabled) return
+        val activity = host?.get() as? ComponentActivity ?: return
+        recording = true
+        hide()
         Recording.start(activity, config) { result ->
+            recording = false
             // Declined or failed: back to the sheet as it was.
-            result.onSuccess { video = it }
-            show()
+            val recorded = result.getOrNull()
+            if (recorded != null) {
+                video?.file?.delete()
+                video = recorded
+            }
+            sheet.model = sheet.model.afterRecording(recorded?.let { SheetAttachment.Video(it.durationSec, it.sizeBytes) })
+            if (finished) recorded?.file?.delete() else show()
         }
     }
 
     override fun onClose() = close()
 
-    private fun close() {
+    /** Ends the report now, mid-send or not. Tests and Cancel. */
+    fun close() {
         sending?.cancel()
-        dialog?.dismiss()
-        dialog = null
+        hide()
         finish()
     }
 
     private fun finish() {
         if (finished) return
         finished = true
+        waiting = false
+        application.unregisterActivityLifecycleCallbacks(this)
         video?.file?.delete()
         video = null
         scope.cancel()

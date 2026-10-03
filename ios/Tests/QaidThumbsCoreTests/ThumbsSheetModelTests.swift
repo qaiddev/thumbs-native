@@ -245,6 +245,35 @@ final class ThumbsSheetModelTests: XCTestCase {
         XCTAssertFalse(model.protectsDraft)
     }
 
+    /// A recording, a marked-up screenshot and a removed one are work too: a swipe asks first.
+    func testARecordingOrAnEditedScreenshotIsADraft() {
+        var markedUp = sheet(.image(dataUrl: shot))
+        XCTAssertFalse(markedUp.screenshotEdited)
+        markedUp.applyMarkup(marked)
+        XCTAssertTrue(markedUp.screenshotEdited)
+        XCTAssertTrue(markedUp.protectsDraft, "a marked-up screenshot")
+
+        var removed = sheet(.image(dataUrl: shot))
+        removed.removeImage()
+        XCTAssertTrue(removed.protectsDraft, "a removed screenshot")
+
+        var recorded = sheet(.image(dataUrl: shot))
+        recorded.attachVideo(durationSec: 4, sizeBytes: 900)
+        XCTAssertTrue(recorded.protectsDraft, "a recording")
+        XCTAssertTrue(sheet(.video(durationSec: 4, sizeBytes: 900)).protectsDraft)
+
+        // Ignored edits change nothing.
+        var ignored = sheet(.image(dataUrl: shot))
+        ignored.applyMarkup("https://example.com/not-a-data-url.png")
+        XCTAssertFalse(ignored.protectsDraft)
+        XCTAssertFalse(sheet(.none).protectsDraft)
+
+        // Gone is gone: nothing left to lose.
+        _ = recorded.primary()
+        recorded.sendFinished(.queued)
+        XCTAssertFalse(recorded.protectsDraft)
+    }
+
     func testAccentIsTheAppsOrTheThemesNeon() {
         XCTAssertEqual(sheet(.none).accent(.dark), .dark)
         XCTAssertEqual(sheet(.none).accent(.light), .light)

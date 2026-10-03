@@ -107,7 +107,7 @@ final class MarkupRendererTests: XCTestCase {
             .map(Pixels.init)?[50, 50], Pixels(image)[50, 50], "an empty stroke draws nothing")
     }
 
-    func testApplyFlattensAtTheCaptureResolutionAsJPEG() throws {
+    func testUseFlattensAtTheCaptureResolutionAsJPEG() throws {
         let image = photo(width: 300, height: 160)
         let dataUrl = pngDataURL(image)
         var doc = MarkupDocument(imageSize: CGSize(width: 300, height: 160), palette: [MarkupColor(hex: "#ff0066")!])
@@ -116,7 +116,9 @@ final class MarkupRendererTests: XCTestCase {
         doc.move(to: CGPoint(x: 140, y: 120))
         doc.end()
 
-        let result = try XCTUnwrap(MarkupRenderer.apply(doc, to: dataUrl))
+        guard case .marked(let result) = MarkupRenderer.use(doc, on: dataUrl) else {
+            return XCTFail("expected a marked-up screenshot")
+        }
         XCTAssertTrue(result.hasPrefix("data:image/jpeg;base64,"))
         XCTAssertTrue(FeedbackRequests.isImageDataUrl(result))
         let decoded = try XCTUnwrap(MarkupRenderer.decode(dataUrl: result))
@@ -129,16 +131,28 @@ final class MarkupRendererTests: XCTestCase {
         }
     }
 
-    func testApplyKeepsTheScreenshotWhenThereIsNothingToKeep() {
+    func testUseKeepsTheScreenshotWhenThereIsNothingToKeep() {
         let dataUrl = pngDataURL(photo(width: 40, height: 40))
         let empty = MarkupDocument(imageSize: CGSize(width: 40, height: 40), palette: [])
-        XCTAssertNil(MarkupRenderer.apply(empty, to: dataUrl), "no marks: no re-encode")
-        var marked = empty
+        XCTAssertEqual(MarkupRenderer.use(empty, on: dataUrl), .unchanged, "no marks: no re-encode")
+        var drawing = empty
+        drawing.tool = .redact
+        drawing.begin(at: .zero)
+        drawing.move(to: CGPoint(x: 20, y: 20))
+        XCTAssertEqual(MarkupRenderer.use(drawing, on: dataUrl), .unchanged, "a mark still being drawn isn't kept")
+    }
+
+    /// A Use that can't flatten is a failure the editor shows, not Back: the redact must not
+    /// be dropped while the sheet carries on with the unredacted screenshot.
+    func testUseThatCannotFlattenFailsRatherThanLookingLikeBack() {
+        var marked = MarkupDocument(imageSize: CGSize(width: 40, height: 40), palette: [])
         marked.tool = .redact
         marked.begin(at: .zero)
         marked.move(to: CGPoint(x: 20, y: 20))
         marked.end()
-        XCTAssertNil(MarkupRenderer.apply(marked, to: "data:image/png;base64,AAAA"), "unreadable image")
+        XCTAssertEqual(MarkupRenderer.use(marked, on: "data:image/png;base64,AAAA"), .failed, "unreadable image")
+        XCTAssertEqual(MarkupRenderer.use(marked, on: "https://example.com/a.png"), .failed, "not a data URL")
+        XCTAssertNotEqual(MarkupRenderer.use(marked, on: pngDataURL(photo(width: 40, height: 40))), .failed)
     }
 
     func testDecodeOnlyReadsImageDataURLs() {

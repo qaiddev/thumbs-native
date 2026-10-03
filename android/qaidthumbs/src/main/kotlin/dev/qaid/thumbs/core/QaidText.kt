@@ -70,6 +70,13 @@ data class QaidText(
     val errorTooLarge: String = "The recording is too long to send. Try a shorter one.",
     val errorServer: String = "The feedback service is having trouble.",
     val errorOffline: String = "You seem to be offline.",
+
+    // New in 0.3.0, named as on iOS: the editor's Use failing, and leaving a draft.
+    /** Under the editor when Use couldn't flatten the marks; the editor stays open. */
+    val markupFailed: String = "Couldn't add the marks. Try Use again.",
+    val discardTitle: String = "Discard this feedback?",
+    val discardConfirm: String = "Discard",
+    val discardCancel: String = "Keep editing",
 ) {
     /** [subtitle] with `{app}` filled in. */
     fun subtitle(appName: String): String = subtitle.replace(APP_TOKEN, appName)

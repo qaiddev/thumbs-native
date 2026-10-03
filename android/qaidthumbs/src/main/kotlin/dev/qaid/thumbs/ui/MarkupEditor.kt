@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -25,14 +26,12 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -46,19 +45,20 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.qaid.thumbs.core.ImageFit
@@ -67,8 +67,6 @@ import dev.qaid.thumbs.core.MarkupCommand
 import dev.qaid.thumbs.core.MarkupDocument
 import dev.qaid.thumbs.core.MarkupPoint
 import dev.qaid.thumbs.core.MarkupTool
-import dev.qaid.thumbs.core.ThumbsSheetModel
-import dev.qaid.thumbs.internal.MarkupRenderer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -77,23 +75,31 @@ import kotlinx.coroutines.withContext
  * The markup editor, full screen over the sheet: the screenshot aspect-fit, marks drawn on it
  * with a finger, and a toolbar of buttons — every tool, colour, Undo and Clear is a plain
  * control, so a screen reader reaches them without drawing. Use flattens the marks onto the
- * screenshot at its own resolution ([onUse] gets the new data URL, or null when there were
- * none); Back drops them.
+ * screenshot at its own resolution, off the main thread; Back drops them. The marks live in
+ * [state], so they survive a rotation. Back waits while Use renders, and a Use that fails
+ * keeps the editor open, marks and all, and says so.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun MarkupEditor(
     dataUrl: String,
     image: ImageBitmap,
-    model: ThumbsSheetModel,
+    state: ThumbsSheetState,
     colors: ThumbsColors,
-    onUse: (String?) -> Unit,
-    onBack: () -> Unit,
+    render: MarkupRender,
 ) {
+    val model = state.model
     val text = model.text
     val palette = remember(model.palette) { MarkupColors.palette(model.palette) }
-    var document by remember(image) { mutableStateOf(MarkupDocument(image.width, image.height, palette)) }
-    var rendering by remember { mutableStateOf(false) }
+    val blank = remember(image, palette) { MarkupDocument(image.width, image.height, palette) }
+    // Read through state each time: the gesture outlives a recomposition.
+    fun current(): MarkupDocument =
+        state.document?.takeIf { it.imageWidth == image.width && it.imageHeight == image.height } ?: blank
+    fun update(next: MarkupDocument) {
+        state.document = next
+    }
+    val document = current()
+    val rendering = state.rendering
     val scope = rememberCoroutineScope()
 
     Column(
@@ -123,25 +129,24 @@ internal fun MarkupEditor(
                     .pointerInput(fit) {
                         awaitEachGesture {
                             val down = awaitFirstDown()
+                            // Use has taken the marks as they were; nothing more is drawn until it ends.
+                            if (state.rendering) return@awaitEachGesture
                             down.consume()
-                            document = document.begin(fit.toImage(down.position.point()))
+                            update(current().begin(fit.toImage(down.position.point())))
                             val completed = drag(down.id) { change ->
-                                document = document.move(fit.toImage(change.position.point()))
+                                update(current().move(fit.toImage(change.position.point())))
                                 change.consume()
                             }
-                            document = if (completed) document.end() else document.cancel()
+                            update(if (completed) current().end() else current().cancel())
                         }
                     },
             ) {
-                drawImage(
-                    image,
-                    dstOffset = IntOffset(fit.offsetX.toInt(), fit.offsetY.toInt()),
-                    dstSize = IntSize(fit.drawnWidth.toInt(), fit.drawnHeight.toInt()),
-                )
+                drawScreenshot(image, fit)
                 drawMarkup(document.commands(), fit)
             }
         }
 
+        val tools = !rendering
         FlowRow(
             Modifier
                 .fillMaxWidth()
@@ -153,38 +158,78 @@ internal fun MarkupEditor(
             verticalArrangement = Arrangement.Center,
         ) {
             MarkupTool.entries.forEach { tool ->
-                ToolButton(tool.label(text), toolIcon(tool), document.tool == tool, colors, ThumbsTags.tool(tool.name.lowercase())) {
-                    document = document.select(tool)
+                ToolButton(tool.label(text), toolIcon(tool), document.tool == tool, tools, colors, ThumbsTags.tool(tool.name.lowercase())) {
+                    update(current().select(tool))
                 }
             }
             palette.forEachIndexed { i, argb ->
-                Swatch(text.markupColor(i + 1), Color(argb), document.color == argb, colors, ThumbsTags.color(i)) {
-                    document = document.select(argb)
+                Swatch(text.markupColor(i + 1), Color(argb), document.color == argb, tools, colors, ThumbsTags.color(i)) {
+                    update(current().select(argb))
                 }
             }
-            ActionButton(text.markupUndo, ThumbsIcons.undo, document.canUndo, colors, ThumbsTags.UNDO) { document = document.undo() }
-            ActionButton(text.markupClear, ThumbsIcons.clear, document.canClear, colors, ThumbsTags.CLEAR) { document = document.clear() }
+            ActionButton(text.markupUndo, ThumbsIcons.undo, tools && document.canUndo, colors, ThumbsTags.UNDO) {
+                update(current().undo())
+            }
+            ActionButton(text.markupClear, ThumbsIcons.clear, tools && document.canClear, colors, ThumbsTags.CLEAR) {
+                update(current().clear())
+            }
+        }
+
+        val error = state.markupError
+        if (rendering || error != null) {
+            Box(Modifier.fillMaxWidth().defaultMinSize(minHeight = 24.dp), contentAlignment = Alignment.Center) {
+                if (rendering) {
+                    CircularProgressIndicator(color = colors.positive, strokeWidth = 2.dp, modifier = Modifier.size(22.dp))
+                } else if (error != null) {
+                    Text(
+                        error, color = colors.negative, fontSize = 14.sp, textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().testTag(ThumbsTags.MARKUP_ERROR)
+                            .semantics { liveRegion = LiveRegionMode.Polite },
+                    )
+                }
+            }
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             NeonPill(
-                text.markupBack, colors.muted, colors,
-                modifier = Modifier.weight(1f).testTag(ThumbsTags.BACK).clickable(role = Role.Button, onClick = onBack),
+                text.markupBack, colors.muted, colors, enabled = !rendering,
+                modifier = Modifier.weight(1f).testTag(ThumbsTags.BACK)
+                    .clickable(enabled = !rendering, role = Role.Button) { state.closeEditor() },
             )
             NeonPill(
                 text.markupUse, colors.positive, colors, lit = true, enabled = !rendering,
                 modifier = Modifier.weight(1f).testTag(ThumbsTags.USE).clickable(enabled = !rendering, role = Role.Button) {
-                    val done = document
-                    if (!done.hasMarks) return@clickable onUse(null)
-                    rendering = true
+                    val done = current()
+                    if (!done.hasMarks) return@clickable state.closeEditor()
+                    if (!state.startRendering()) return@clickable
                     scope.launch {
-                        val marked = withContext(Dispatchers.Default) { MarkupRenderer.render(dataUrl, done.commands()) }
-                        rendering = false
-                        onUse(marked)
+                        try {
+                            val marked = withContext(Dispatchers.Default) {
+                                runCatching { render(dataUrl, done.commands()) }.getOrNull()
+                            }
+                            state.markupRendered(marked)
+                        } finally {
+                            // Left the screen mid-render (a rotation): the marks wait for another Use.
+                            state.renderingCancelled()
+                        }
                     }
                 },
             )
         }
+    }
+}
+
+/**
+ * The screenshot through [fit]'s own float transform — the one the marks and the touch mapping
+ * use. Whole-pixel offsets and sizes would leave the drawn image up to a few pixels off the
+ * marks, so a redact dragged to the visible edge could miss the last columns of the screenshot.
+ */
+internal fun DrawScope.drawScreenshot(image: ImageBitmap, fit: ImageFit) {
+    withTransform({
+        translate(fit.offsetX, fit.offsetY)
+        scale(fit.scale, fit.scale, pivot = Offset.Zero)
+    }) {
+        drawImage(image)
     }
 }
 
@@ -226,7 +271,15 @@ internal fun DrawScope.drawMarkup(commands: List<MarkupCommand>, fit: ImageFit) 
 
 /** A tool: one of four, so TalkBack says which is selected. */
 @Composable
-private fun ToolButton(label: String, icon: ImageVector, selected: Boolean, colors: ThumbsColors, tag: String, onSelect: () -> Unit) {
+private fun ToolButton(
+    label: String,
+    icon: ImageVector,
+    selected: Boolean,
+    enabled: Boolean,
+    colors: ThumbsColors,
+    tag: String,
+    onSelect: () -> Unit,
+) {
     val tint = if (selected) colors.positive else colors.ink
     Box(
         Modifier
@@ -235,7 +288,7 @@ private fun ToolButton(label: String, icon: ImageVector, selected: Boolean, colo
             .background(colors.surface2)
             .border(BorderStroke(1.dp, if (selected) colors.positive else colors.line), CircleShape)
             .testTag(tag)
-            .selectable(selected = selected, role = Role.RadioButton, onClick = onSelect)
+            .selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = onSelect)
             .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {
@@ -244,12 +297,20 @@ private fun ToolButton(label: String, icon: ImageVector, selected: Boolean, colo
 }
 
 @Composable
-private fun Swatch(label: String, color: Color, selected: Boolean, colors: ThumbsColors, tag: String, onSelect: () -> Unit) {
+private fun Swatch(
+    label: String,
+    color: Color,
+    selected: Boolean,
+    enabled: Boolean,
+    colors: ThumbsColors,
+    tag: String,
+    onSelect: () -> Unit,
+) {
     Box(
         Modifier
             .size(MinTarget)
             .testTag(tag)
-            .selectable(selected = selected, role = Role.RadioButton, onClick = onSelect)
+            .selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = onSelect)
             .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {

@@ -77,6 +77,8 @@ internal data class ThumbsSheetModel(
     /** Sent or queued: the report is out of the person's hands. */
     val finished: Boolean = false,
     val status: SheetStatus? = null,
+    /** The screenshot was marked up or removed: work a dismissal would lose. */
+    val screenshotEdited: Boolean = false,
 ) {
     // What the sheet shows.
 
@@ -102,6 +104,9 @@ internal data class ThumbsSheetModel(
     val showsRecord: Boolean get() = recordingAllowed && !isVideo && !finished
     val showsTools: Boolean get() = showsMarkup || showsRecord
 
+    /** Remove, Mark up (and the screenshot that opens it) and Record wait while a send is running. */
+    val toolsEnabled: Boolean get() = !busy
+
     /** A recording is stored as type "video" whatever is picked, so thumbs would mean nothing. */
     val showsKind: Boolean get() = !isVideo
 
@@ -115,6 +120,13 @@ internal data class ThumbsSheetModel(
     val hasContent: Boolean get() = kind != FeedbackKind.NEUTRAL || message.isNotBlank() || showsImage || isVideo
 
     val sendEnabled: Boolean get() = finished || (!busy && hasContent)
+
+    /**
+     * Something Back would lose: a send running, or, before it has gone, a thumb, words, a
+     * recording, or a screenshot marked up or removed. Back then asks before discarding.
+     */
+    val protectsDraft: Boolean
+        get() = busy || (!finished && (kind != FeedbackKind.NEUTRAL || message.isNotBlank() || isVideo || screenshotEdited))
     val sendLabel: String get() = if (finished) text.done else text.send
     val dismissLabel: String get() = if (finished) text.close else text.cancel
 
@@ -148,11 +160,11 @@ internal data class ThumbsSheetModel(
         if (finished) this else copy(message = value.take(FeedbackRequests.MAX_MESSAGE_LENGTH))
 
     fun removingImage(): ThumbsSheetModel =
-        if (finished || !showsImage) this else copy(attachment = SheetAttachment.None)
+        if (!showsRemove || !toolsEnabled) this else copy(attachment = SheetAttachment.None, screenshotEdited = true)
 
     /** The screenshot after the markup editor's Use. */
     fun withMarkup(dataUrl: String): ThumbsSheetModel =
-        if (finished || !showsImage) this else copy(attachment = SheetAttachment.Image(dataUrl))
+        if (!showsMarkup || !toolsEnabled) this else copy(attachment = SheetAttachment.Image(dataUrl), screenshotEdited = true)
 
     /** What the big button does now, or null while it is disabled. */
     fun primary(): PrimaryAction? = when {

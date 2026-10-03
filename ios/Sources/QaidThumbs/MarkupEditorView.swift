@@ -4,14 +4,18 @@ import UIKit
 
 /// Full-screen markup over the screenshot: rectangle, arrow, pen and redact, a colour
 /// from the configured palette, undo and clear. Use flattens the marks into the
-/// screenshot at its own pixel size; Back drops them. Every tool and action is a button,
-/// so nothing needs a drawing gesture except the drawing itself.
+/// screenshot at its own pixel size, off the main thread, with a spinner; Back drops them.
+/// While Use runs nothing else can be tapped, and a Use that fails keeps the editor open,
+/// marks and all, and says so. Every tool and action is a button, so nothing needs a
+/// drawing gesture except the drawing itself.
 struct MarkupEditorView: View {
     let request: MarkupRequest
     let text: QaidText
     let look: ThumbsLook
     let onFinish: (String?) -> Void
     @State private var document: MarkupDocument
+    @State private var rendering = false
+    @State private var failed = false
     @GestureState private var dragging = false
     @ScaledMetric(relativeTo: .body) private var iconSize: CGFloat = 20
     @ScaledMetric(relativeTo: .body) private var swatchSize: CGFloat = 28
@@ -39,6 +43,14 @@ struct MarkupEditorView: View {
                 .fixedSize(horizontal: false, vertical: true)
             canvas
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .allowsHitTesting(!rendering)
+            if failed {
+                Text(text.markupFailed)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundColor(look.negative)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             toolbar
         }
         .padding(12)
@@ -112,13 +124,45 @@ struct MarkupEditorView: View {
             HStack(spacing: 10) {
                 Button(text.markupBack) { onFinish(nil) }
                     .buttonStyle(NeonButtonStyle(color: look.muted, on: false, look: look))
-                Button(text.markupUse) { onFinish(MarkupRenderer.apply(document, to: request.dataUrl)) }
-                    .buttonStyle(NeonButtonStyle(color: look.positive, on: true, look: look))
+                Button(action: use) {
+                    if rendering {
+                        ProgressView().tint(look.positive)
+                    } else {
+                        Text(text.markupUse)
+                    }
+                }
+                .buttonStyle(NeonButtonStyle(color: look.positive, on: true, look: look))
+                .accessibilityLabel(text.markupUse)
             }
         }
+        // Use has taken the marks as they were: nothing changes them, and Back can't race it.
+        .disabled(rendering)
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(look.surface))
         .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(look.line, lineWidth: 1))
+    }
+
+    /// Flattens off the main thread. `.unchanged` (no marks) closes like Back; `.failed`
+    /// stays, so a redact is never silently dropped.
+    private func use() {
+        guard !rendering else { return }
+        let document = self.document
+        let dataUrl = request.dataUrl
+        rendering = true
+        failed = false
+        Task { @MainActor in
+            let result = await Task.detached(priority: .userInitiated) {
+                MarkupRenderer.use(document, on: dataUrl)
+            }.value
+            rendering = false
+            switch result {
+            case .unchanged: onFinish(nil)
+            case .marked(let url): onFinish(url)
+            case .failed:
+                failed = true
+                Announcer.announce(text.markupFailed)
+            }
+        }
     }
 
     private static func icon(_ tool: MarkupTool) -> String {

@@ -61,8 +61,9 @@ final class FeedbackCoordinator {
     }
 }
 
-/// The sheet for UIKit: the SwiftUI form in a page sheet. A swipe down closes it only
-/// while there is nothing to lose; VoiceOver stays inside it.
+/// The sheet for UIKit: the SwiftUI form in a page sheet. A swipe down closes it while
+/// there is nothing to lose, and asks "Discard this feedback?" when there is (as Back
+/// does on Android); VoiceOver stays inside it.
 final class ThumbsHostingController: UIHostingController<ThumbsSheetView>, UIAdaptivePresentationControllerDelegate {
     private let session: ThumbsSession
     private var watch: AnyCancellable?
@@ -93,6 +94,11 @@ final class ThumbsHostingController: UIHostingController<ThumbsSheetView>, UIAda
 
     func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
         session.dismissedBySystem()
+    }
+
+    /// A swipe down refused by `isModalInPresentation`: ask before discarding the draft.
+    func presentationControllerDidAttemptToDismiss(_ presentationController: UIPresentationController) {
+        session.requestDismiss()
     }
 }
 #endif

@@ -8,10 +8,16 @@ import UIKit
 @MainActor
 final class ThumbsSession: ObservableObject {
     @Published private(set) var model: ThumbsSheetModel
-    /// The screenshot as shown, decoded once per change rather than on every redraw.
+    /// The screenshot as shown, decoded off the main thread once per change.
     @Published private(set) var preview: UIImage?
+    /// That decode is running (a spinner where the screenshot goes).
+    @Published private(set) var previewLoading = false
     /// The markup editor, while it is open.
     @Published var markup: MarkupRequest?
+    /// The screenshot is being decoded for the editor (a spinner on Mark up).
+    @Published private(set) var preparingMarkup = false
+    /// "Discard this feedback?" is up: a swipe down tried to take a draft away.
+    @Published var confirmingDiscard = false
 
     let config: QaidThumbsConfiguration
     private let screen: String?
@@ -21,6 +27,7 @@ final class ThumbsSession: ObservableObject {
     private var sending: Task<Void, Never>?
     /// The app's own system-log errors, read while the person writes.
     private var systemLogs: Task<[LogEntry], Never>?
+    private var previewTask: Task<Void, Never>?
     private var closed = false
 
     /// Takes the sheet off screen, then runs the closure. Set by the host.
@@ -41,8 +48,23 @@ final class ThumbsSession: ObservableObject {
         refreshPreview()
     }
 
+    /// Base64 and JPEG decoding run off the main thread; only the newest result lands.
     private func refreshPreview() {
-        preview = model.image.flatMap(ScreenCapture.image(fromDataURL:))
+        previewTask?.cancel()
+        preview = nil
+        guard let dataUrl = model.image else {
+            previewLoading = false
+            return
+        }
+        previewLoading = true
+        previewTask = Task { [weak self] in
+            let decoded = await Task.detached(priority: .userInitiated) {
+                ScreenCapture.image(fromDataURL: dataUrl).map(DecodedImage.init)
+            }.value
+            guard let self, !Task.isCancelled, self.model.image == dataUrl else { return }
+            self.preview = decoded?.image
+            self.previewLoading = false
+        }
     }
 
     // MARK: The form
@@ -52,17 +74,29 @@ final class ThumbsSession: ObservableObject {
     func setMessage(_ value: String) { model.setMessage(value) }
 
     func removeImage() {
+        guard model.showsRemove, model.toolsEnabled else { return }
         model.removeImage()
         refreshPreview()
     }
 
+    /// Decodes the screenshot for the editor off the main thread, then opens it.
     func openMarkup() {
-        guard model.showsMarkup, model.toolsEnabled, let dataUrl = model.image,
-              let image = MarkupRenderer.decode(dataUrl: dataUrl) else { return }
-        withoutMotionIfReduced { markup = MarkupRequest(dataUrl: dataUrl, image: image) }
+        guard model.showsMarkup, model.toolsEnabled, !preparingMarkup, markup == nil,
+              let dataUrl = model.image else { return }
+        preparingMarkup = true
+        Task { [weak self] in
+            let decoded = await Task.detached(priority: .userInitiated) {
+                MarkupRenderer.decode(dataUrl: dataUrl).map(DecodedCGImage.init)
+            }.value
+            guard let self else { return }
+            self.preparingMarkup = false
+            guard let image = decoded?.image, !self.closed, self.model.image == dataUrl, self.model.toolsEnabled
+            else { return }
+            self.withoutMotionIfReduced { self.markup = MarkupRequest(dataUrl: dataUrl, image: image) }
+        }
     }
 
-    /// The editor closed: with the flattened image on Use, nil on Back.
+    /// The editor closed: with the flattened image on Use, nil on Back (or Use with no marks).
     func markupFinished(_ result: String?) {
         withoutMotionIfReduced { markup = nil }
         guard let result else { return }
@@ -107,9 +141,22 @@ final class ThumbsSession: ObservableObject {
         dismiss { [weak self] in self?.finish() }
     }
 
-    /// The sheet went away by itself (a swipe down).
+    /// The sheet went away by itself (a swipe down with nothing to lose, or the app took it away).
     func dismissedBySystem() {
         finish()
+    }
+
+    /// A swipe down was refused because of `model.protectsDraft`: ask before discarding.
+    /// Android's Back asks the same question.
+    func requestDismiss() {
+        guard !closed else { return }
+        if model.protectsDraft { confirmingDiscard = true } else { close() }
+    }
+
+    /// "Discard" in that question.
+    func discard() {
+        confirmingDiscard = false
+        close()
     }
 
     private func finish() {
@@ -117,6 +164,7 @@ final class ThumbsSession: ObservableObject {
         closed = true
         sending?.cancel()
         systemLogs?.cancel()
+        previewTask?.cancel()
         if let video { try? FileManager.default.removeItem(at: video.url) }
         video = nil
         onFinish?()
@@ -187,6 +235,15 @@ final class ThumbsSession: ObservableObject {
 struct MarkupRequest: Identifiable {
     let id = UUID()
     let dataUrl: String
+    let image: CGImage
+}
+
+/// A freshly decoded image handed from a detached task to the main actor; nothing else holds it.
+struct DecodedImage: @unchecked Sendable {
+    let image: UIImage
+}
+
+struct DecodedCGImage: @unchecked Sendable {
     let image: CGImage
 }
 #endif

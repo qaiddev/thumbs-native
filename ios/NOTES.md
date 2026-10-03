@@ -48,6 +48,11 @@ For apps that present the sheet themselves (`.sheet { QaidThumbsSheet(...) }`). 
 the screenshot with `QaidThumbs.captureScreenshot()` before presenting. It has no Record
 screen button: recording needs the sheet off screen, which only `present()` can do.
 `onClose` must dismiss it; it runs for Cancel/Done and before `onLinkedQuest`.
+While it has a draft (`ThumbsSheetModel.protectsDraft`) it applies
+`.interactiveDismissDisabled`, so a swipe can't take it away; SwiftUI has no hook to ask
+first, so Cancel is the way out. It ends its session when it disappears (not when the
+markup editor covers it), and registers with `QaidThumbs` while up, so `present()` and
+shake to report don't open a second sheet over it.
 
 ## Configuration
 
@@ -120,7 +125,10 @@ removeScreenshot, screenRecording, markupTitle, markupHelp, markupUse, markupBac
 markupColor (`{n}`)** (new in 0.3.0), attachScreenshot, recordInstead, errorGeneric,
 recordingStop, recordingStopLabel, recordingUnavailable, recordingNotStarted,
 recordingFailed, errorNotConfigured, errorSetup, errorRecordingsOff, errorQuota,
-errorTooLarge, errorServer, errorOffline.
+errorTooLarge, errorServer, errorOffline, **markupFailed, discardTitle, discardConfirm,
+discardCancel** (new in 0.3.0, appended so existing calls compile; same names and English
+as Android: "Couldn't add the marks. Try Use again.", "Discard this feedback?", "Discard",
+"Keep editing").
 
 ```swift
 public func subtitle(appName: String) -> String
@@ -164,7 +172,9 @@ Removed from Core: `Bridge`, `BridgeTheme` (now `QaidTheme`), `BridgeAttachment`
 
 The sheet's state machine (`ThumbsSheetModel`) and the markup model (`MarkupDocument`,
 `MarkupShape`, `MarkupTool`, `MarkupCommand`, `ImageFit`, `ArrowGeometry`, `PenPath`,
-`MarkupRenderer`) are `package`, not public API.
+`MarkupRenderer`, `MarkupUse`) are `package`, not public API. `MarkupRenderer.use(_:on:)`
+(→ `.unchanged` / `.marked(dataUrl)` / `.failed`) replaced `apply(_:to:)`, whose nil meant
+both "no marks" and "failed".
 
 ## Notes
 
@@ -176,3 +186,13 @@ The sheet's state machine (`ThumbsSheetModel`) and the markup model (`MarkupDocu
   JPEG 0.85. Redact is an opaque black box on whole pixels, rounded outward.
 - Linked quest: after a 2xx only, the sheet closes first and `onLinkedQuest` runs once it is
   off screen, so the app can present the quest from where the sheet was.
+- Draft protection: `protectsDraft` is a send running, or (before it has gone) a thumb,
+  words, a recording, or a screenshot marked up or removed. The `present()` sheet then
+  refuses a swipe and asks "Discard this feedback?" (Discard / Keep editing) — the same
+  question Android's Back asks. Cancel always closes at once.
+- Off the main thread: the preview's decode, the editor's decode on Mark up, and Use's
+  flatten + JPEG + base64, each with a spinner. While Use runs the editor takes no input
+  (Back included). A Use that fails keeps the editor open with its marks and shows
+  `markupFailed`; only Back drops marks.
+- Remove, Mark up (button and screenshot) and Record are disabled while a send runs
+  (`toolsEnabled`).

@@ -53,16 +53,17 @@ internal sealed interface MarkupCommand {
 internal object MarkupColors {
     const val BLACK = 0xFF000000.toInt()
 
-    /** `#rrggbb` (or `#rgb`) → opaque ARGB; null for anything else. */
+    /** `#rgb`, `#rrggbb` or `#rrggbbaa` (as on iOS) → ARGB, opaque unless given an alpha; null for anything else. */
     fun parse(hex: String): Int? {
         val h = hex.trim().removePrefix("#")
-        val full = when (h.length) {
-            3 -> h.map { "$it$it" }.joinToString("")
-            6 -> h
-            else -> return null
+        if (h.isEmpty() || !h.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) return null
+        return when (h.length) {
+            3 -> (0xFF shl 24) or h.map { "$it$it" }.joinToString("").toInt(16)
+            6 -> (0xFF shl 24) or h.toInt(16)
+            // rrggbbaa: the alpha moves to the front.
+            8 -> h.toLong(16).let { (((it and 0xFFL) shl 24) or (it ushr 8)).toInt() }
+            else -> null
         }
-        val rgb = full.toIntOrNull(16) ?: return null
-        return (0xFF shl 24) or rgb
     }
 
     /** The configured palette's readable colours, or qaid's default when none are. */

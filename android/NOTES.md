@@ -48,7 +48,7 @@ data class QaidThumbsConfig(
     val appName: String,
     val endpoint: String = "https://qaid.dev/api/feedback",
     val accent: NeonAccent? = null,
-    val palette: List<String> = DEFAULT_PALETTE, // "#rrggbb"; redact is always black
+    val palette: List<String> = DEFAULT_PALETTE, // "#rgb" / "#rrggbb" / "#rrggbbaa", as iOS; redact is always black
     val allowRecording: Boolean = true,
     val maxVideoBytes: Long = 48L * 1024 * 1024,
     val maxRecordingSeconds: Int = 180,
@@ -111,7 +111,10 @@ recordingNotificationText recordingUnavailable recordingNotStarted recordingFail
 errorNotConfigured errorSetup errorRecordingsOff errorQuota errorTooLarge errorServer
 errorOffline`). New for the native editor, named as on iOS: `markupRectangle markupArrow
 markupPen markupRedact markupUndo markupClear markupColor` ("Colour {n}").
-`attachScreenshot` and `recordInstead` are no longer drawn.
+`attachScreenshot` and `recordInstead` are no longer drawn. Also new in 0.3.0, appended
+after `errorOffline`, same names and English as iOS: `markupFailed` ("Couldn't add the marks.
+Try Use again."), `discardTitle` ("Discard this feedback?"), `discardConfirm` ("Discard"),
+`discardCancel` ("Keep editing").
 
 Everything else is `internal`: the sheet (`ui/ThumbsSheet`, `ui/MarkupEditor`), the session,
 and the core plumbing that 0.2 had public (`FeedbackRequests`, `DeviceInfo`, `QaidResult`,
@@ -146,6 +149,26 @@ offline fallback form, the 15 s ready timeout, `androidx.webkit`.
   stroke `max(4, round(width / 220))`, redact an opaque unantialiased black fill on whole pixels.
 - A linked quest: after a 2xx for a kind in `quests`, with `onLinkedQuest` set, the sheet
   closes and the hook runs (posted to the main thread). Hook null → the sheet says Sent.
+- The session (`internal/ThumbsSession`) holds the report, not the dialog: a
+  `ThumbsSheetState` with the model, the editor's open state and marks, and the discard
+  question, plus the recording and any send in flight. It watches activities through
+  `Application.ActivityLifecycleCallbacks`, so a plain `Activity` works (no LifecycleOwner
+  needed). When the sheet's activity is destroyed the dialog goes with it; on a
+  configuration change (or the system reclaiming it) the sheet comes back on the next
+  resumed activity exactly as it was, and only an activity that is finishing for good ends
+  the report. After recording, the sheet goes up on whichever activity is resumed; with none
+  resumed it waits, draft and video kept, for the next.
+- Back: closes the editor first (not while Use renders), then, when `protectsDraft` (a send
+  running, or before it has gone a thumb, words, a recording, or a screenshot marked up or
+  removed), asks "Discard this feedback?" — the question iOS asks on a swipe down. Cancel
+  always closes at once.
+- Remove, Mark up (button and screenshot) and Record are disabled while a send runs
+  (`toolsEnabled`, as on iOS); the session ignores a Record that arrives anyway.
+- Use renders off the main thread with a spinner; Back and the tools wait for it. A Use that
+  fails (`MarkupRenderer.render` → null, a null `Bitmap.copy`, out of memory) keeps the
+  editor open with its marks and shows `markupFailed`. The screenshot is drawn through the
+  fit's float transform, the same one the marks and touches use, so a redact dragged to the
+  image's visible edge reaches its last pixels.
 
 ## Tests and coverage
 

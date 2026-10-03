@@ -55,7 +55,7 @@ final class ShakeMonitor {
 
     private func shaken() {
         // A shake with no configuration, or mid-report, is just a shake.
-        guard QaidThumbs.isConfigured, QaidThumbs.coordinator == nil, !QaidThumbs.isRecording else { return }
+        guard QaidThumbs.isConfigured, !QaidThumbs.isShowingSheet, !QaidThumbs.isRecording else { return }
         QaidThumbs.present(delay: 0)
     }
 }

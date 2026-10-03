@@ -1,10 +1,17 @@
 package dev.qaid.thumbs.ui
 
+import android.app.Activity
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.os.Looper
 import androidx.activity.ComponentActivity
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.onNodeWithText
+import androidx.lifecycle.Lifecycle
+import kotlinx.coroutines.CompletableDeferred
+import org.robolectric.Robolectric
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -45,9 +52,13 @@ import java.util.concurrent.CopyOnWriteArrayList
 /** Every request the SDK made, answered by [respond]. */
 private class FakeTransport(var respond: (Request) -> QaidResult) : FeedbackTransport {
     val bodies = CopyOnWriteArrayList<JSONObject>()
+
+    /** When set, every answer waits for it: a send still in flight. */
+    @Volatile var gate: CompletableDeferred<Unit>? = null
     override suspend fun send(request: Request): QaidResult {
         val buffer = Buffer().also { request.body?.writeTo(it) }
         runCatching { bodies += JSONObject(buffer.readUtf8()) }
+        gate?.await()
         return respond(request)
     }
 }
@@ -81,9 +92,9 @@ class QaidThumbsFlowTest {
     }
 
     @After fun tearDown() {
-        // Close whatever sheet a test left open, so the next present() can start a session.
-        val open = compose.onAllNodes(hasTestTag(ThumbsTags.DISMISS)).fetchSemanticsNodes().isNotEmpty()
-        if (open) compose.onNodeWithTag(ThumbsTags.DISMISS).performClick()
+        // End whatever report a test left open (or waiting for an activity), so the next present() can start one.
+        server.gate?.complete(Unit)
+        compose.runOnUiThread { QaidThumbs.closeSession() }
         idle()
         QaidThumbs.onLinkedQuest = null
         QaidThumbs.capturer = ScreenCapture
@@ -98,8 +109,8 @@ class QaidThumbsFlowTest {
 
     private fun exists(tag: String) = compose.onAllNodes(hasTestTag(tag)).fetchSemanticsNodes().isNotEmpty()
 
-    private fun present(dark: Boolean? = true) {
-        compose.runOnUiThread { QaidThumbs.present(compose.activity, screen = "Home", dark = dark, delayMs = 0) }
+    private fun present(dark: Boolean? = true, activity: Activity? = null) {
+        compose.runOnUiThread { QaidThumbs.present(activity ?: compose.activity, screen = "Home", dark = dark, delayMs = 0) }
         idle()
         compose.waitUntil(5_000) { idle(); exists(ThumbsTags.SHEET) }
     }
@@ -224,8 +235,9 @@ class QaidThumbsFlowTest {
 
     private fun pressBackInDialog() {
         compose.runOnUiThread {
-            val dialog = org.robolectric.shadows.ShadowDialog.getLatestDialog() as androidx.activity.ComponentDialog
-            dialog.onBackPressedDispatcher.onBackPressed()
+            // The sheet's own window: a discard question is a dialog of its own, on top.
+            val dialog = org.robolectric.shadows.ShadowDialog.getShownDialogs().last { it is ThumbsSheetDialog && it.isShowing }
+            (dialog as ThumbsSheetDialog).onBackPressedDispatcher.onBackPressed()
         }
         idle()
     }
@@ -259,5 +271,119 @@ class QaidThumbsFlowTest {
         assertTrue(Color.red(outside) > 240)
         assertNull(MarkupRenderer.render("data:image/png;base64,AAAA", emptyList()))
         assertNull(ScreenCapture.decode("no comma"))
+    }
+
+    // The report outlives its activity's configuration changes, and only ends when it really goes.
+
+    @Test fun aRotationKeepsTheDraftAndPutsTheSheetBackUp() {
+        present()
+        tag(ThumbsTags.UP).performClick()
+        tag(ThumbsTags.MESSAGE).performTextInput("half written")
+        val before = compose.activity
+        compose.activityRule.scenario.recreate()
+        idle()
+        compose.waitUntil(5_000) { idle(); exists(ThumbsTags.SHEET) }
+        assertTrue("a new activity", before !== compose.activity)
+        tag(ThumbsTags.UP).assertIsOn()
+        compose.onNodeWithText("half written").assertExists()
+        tag(ThumbsTags.SEND).performClick()
+        compose.waitUntil(5_000) { idle(); quests.isNotEmpty() }
+        val body = server.bodies.single()
+        assertEquals("half written", body.getString("message"))
+        assertTrue(body.getString("screenshot").startsWith("data:image/"))
+    }
+
+    @Test fun aRotationMidSendKeepsTheSendAndShowsItsResult() {
+        QaidThumbs.onLinkedQuest = null
+        server.gate = CompletableDeferred()
+        present()
+        tag(ThumbsTags.DOWN).performClick()
+        tag(ThumbsTags.SEND).performClick()
+        compose.waitUntil(5_000) { idle(); server.bodies.isNotEmpty() }
+        compose.activityRule.scenario.recreate()
+        compose.waitUntil(5_000) { idle(); exists(ThumbsTags.SHEET) }
+        tag(ThumbsTags.STATUS).assertTextEquals("Sending…")
+        server.gate!!.complete(Unit)
+        compose.waitUntil(5_000) { idle(); statusText() == "Sent. Thank you!" }
+        assertEquals(1, server.bodies.size)
+    }
+
+    @Test fun aPlainActivityFinishingEndsTheReport() {
+        val controller = Robolectric.buildActivity(Activity::class.java).setup()
+        present(activity = controller.get())
+        tag(ThumbsTags.UP).performClick()
+        compose.runOnUiThread {
+            controller.get().finish()
+            controller.pause().stop().destroy()
+        }
+        idle()
+        assertTrue(!exists(ThumbsTags.SHEET))
+        // Not stuck: the next report starts.
+        present()
+        tag(ThumbsTags.SHEET).assertExists()
+    }
+
+    /** Record is disabled mid-send: its return used to re-enable Send while the first was still going. */
+    @Test fun recordWaitsForASendSoItCantGoTwice() {
+        QaidThumbs.onLinkedQuest = null
+        server.gate = CompletableDeferred()
+        present()
+        tag(ThumbsTags.UP).performClick()
+        tag(ThumbsTags.SEND).performClick()
+        compose.waitUntil(5_000) { idle(); server.bodies.isNotEmpty() }
+        tag(ThumbsTags.RECORD).assertIsNotEnabled().performClick()
+        tag(ThumbsTags.MARKUP).assertIsNotEnabled()
+        idle()
+        assertTrue(exists(ThumbsTags.SHEET))
+        tag(ThumbsTags.SEND).assertIsNotEnabled().performClick()
+        server.gate!!.complete(Unit)
+        compose.waitUntil(5_000) { idle(); statusText() == "Sent. Thank you!" }
+        assertEquals(1, server.bodies.size)
+    }
+
+    @Test fun backWithADraftAsksFirst() {
+        present()
+        tag(ThumbsTags.UP).performClick()
+        pressBackInDialog()
+        tag(ThumbsTags.DISCARD_CANCEL).performClick()
+        idle()
+        assertTrue(exists(ThumbsTags.SHEET))
+        tag(ThumbsTags.UP).assertIsOn()
+        pressBackInDialog()
+        tag(ThumbsTags.DISCARD_CONFIRM).performClick()
+        idle()
+        assertTrue(!exists(ThumbsTags.SHEET))
+        present()
+        tag(ThumbsTags.SHEET).assertExists()
+    }
+
+    /**
+     * After recording, the activity that opened the report may be gone (the person moved on to
+     * show the problem). The sheet goes up on whichever activity is resumed — waiting, draft
+     * and all, while none is.
+     */
+    @Test fun afterRecordingTheSheetGoesUpOnTheActivityResumedThen() {
+        val opener = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        present(activity = opener.get())
+        tag(ThumbsTags.UP).performClick()
+        tag(ThumbsTags.MESSAGE).performTextInput("kept")
+        tag(ThumbsTags.RECORD).performClick()
+        idle()
+        assertTrue(!exists(ThumbsTags.SHEET))
+        val asked = shadowOf(opener.get()).nextStartedActivityForResult
+        assertTrue(asked != null)
+        // The person leaves the opener for good, then declines (or the recording ends).
+        compose.runOnUiThread {
+            opener.get().finish()
+            opener.pause().stop().destroy()
+            shadowOf(opener.get()).receiveResult(asked.intent, Activity.RESULT_CANCELED, null)
+        }
+        idle()
+        assertTrue("no activity resumed yet: it waits", !exists(ThumbsTags.SHEET))
+        compose.activityRule.scenario.moveToState(Lifecycle.State.STARTED)
+        compose.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
+        compose.waitUntil(5_000) { idle(); exists(ThumbsTags.SHEET) }
+        tag(ThumbsTags.UP).assertIsOn()
+        compose.onNodeWithText("kept").assertExists()
     }
 }

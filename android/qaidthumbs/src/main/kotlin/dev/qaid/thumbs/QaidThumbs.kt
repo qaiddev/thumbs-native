@@ -175,6 +175,10 @@ object QaidThumbs {
      *   choice when it overrides the system's.
      * @param delayMs lets a menu or ripple that triggered this settle first, so the screenshot
      *   shows the app as the person saw it.
+     *
+     * The report outlives the activity's configuration changes: after a rotation the sheet
+     * comes back on the new activity with everything in it. It ends with Cancel, Done, Discard,
+     * or the activity finishing for good.
      */
     fun present(activity: Activity, screen: String? = null, dark: Boolean? = null, delayMs: Long = 250) {
         val config = config ?: error("QaidThumbs.configure() must be called before present()")
@@ -187,6 +191,11 @@ object QaidThumbs {
         }
         session = next
         main.postDelayed({ next.start() }, delayMs)
+    }
+
+    /** Ends the report in progress, if any, sheet up or waiting for an activity. Main thread. */
+    internal fun closeSession() {
+        session?.close()
     }
 
     /** Hands a linked quest to the app, if it asked for them. True when it did. */
