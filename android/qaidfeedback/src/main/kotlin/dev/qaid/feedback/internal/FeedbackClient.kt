@@ -9,7 +9,6 @@ import dev.qaid.feedback.core.QaidConfig
 import dev.qaid.feedback.core.QaidError
 import dev.qaid.feedback.core.QaidResult
 import dev.qaid.feedback.core.RetryPolicy
-import dev.qaid.feedback.core.ScreenshotSubmission
 import dev.qaid.feedback.core.VideoPolicy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -24,35 +23,32 @@ import java.util.concurrent.TimeUnit
 
 /**
  * The one network path: screenshot reports and recordings both go out here, with the same
- * retry rule (network and 5xx only, never a refused request).
+ * retry rule (network and 5xx only, never a refused request). The offline queue replays
+ * through [sendOnce] with the same client.
  */
 internal class FeedbackClient(
     private val context: Context,
     private val config: QaidConfig,
     private val retry: RetryPolicy = RetryPolicy(),
 ) {
-    private val device: DeviceInfo by lazy { deviceInfo(context, config.appName) }
+    val device: DeviceInfo by lazy { deviceInfo(context, config.appName) }
+    val visitorId: String get() = VisitorId.get(context)
+    val packageName: String get() = context.packageName
 
-    suspend fun sendScreenshot(submission: ScreenshotSubmission): String =
-        execute(FeedbackRequests.jsonRequest(config, device, VisitorId.get(context), submission))
+    /** A JSON report body → the new feedback's id. */
+    suspend fun sendJson(body: String): String =
+        execute(FeedbackRequests.jsonRequest(config.endpoint, device.userAgent, body))
 
-    suspend fun sendVideo(file: File, message: String, screen: String?): String {
+    suspend fun sendVideo(file: File, fields: List<Pair<String, String>>): String {
         if (file.length() > VideoPolicy.SERVER_LIMIT) throw QaidError.TooLarge
-        return execute(FeedbackRequests.videoRequest(config, device, VisitorId.get(context), file, message, screen))
+        return execute(FeedbackRequests.videoRequest(config.videoEndpoint, device.userAgent, fields, file))
     }
 
-    private suspend fun execute(request: Request): String = withContext(Dispatchers.IO) {
+    private suspend fun execute(request: Request): String {
         var attempt = 0
         while (true) {
-            val result = try {
-                http.newCall(request).execute().use { response ->
-                    FeedbackRequests.parseResponse(response.code, response.body.string())
-                }
-            } catch (e: IOException) {
-                QaidResult.Failure(QaidError.Network(e.message ?: "I/O error"))
-            }
-            when (result) {
-                is QaidResult.Success -> return@withContext result.id
+            when (val result = sendOnce(request)) {
+                is QaidResult.Success -> return result.id
                 is QaidResult.Failure -> {
                     val wait = retry.delayAfter(attempt, result.error) ?: throw result.error
                     attempt++
@@ -60,11 +56,20 @@ internal class FeedbackClient(
                 }
             }
         }
-        @Suppress("UNREACHABLE_CODE")
-        error("unreachable")
     }
 
     companion object {
+        /** One attempt, no retries. */
+        suspend fun sendOnce(request: Request): QaidResult = withContext(Dispatchers.IO) {
+            try {
+                http.newCall(request).execute().use { response ->
+                    FeedbackRequests.parseResponse(response.code, response.body.string())
+                }
+            } catch (e: IOException) {
+                QaidResult.Failure(QaidError.Network(e.message ?: "I/O error"))
+            }
+        }
+
         private val http: OkHttpClient by lazy {
             OkHttpClient.Builder()
                 .connectTimeout(15, TimeUnit.SECONDS)

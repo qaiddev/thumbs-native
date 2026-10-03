@@ -13,10 +13,12 @@ public struct DeviceInfo: Equatable {
     public var screenWidth: Int
     public var screenHeight: Int
     public var sdkVersion: String
+    /// For the default `app://<bundle id>` page URL.
+    public var bundleIdentifier: String
 
     public init(platform: String = "ios", osVersion: String, model: String, appName: String, appVersion: String,
                 build: String, locale: String, screenWidth: Int, screenHeight: Int,
-                sdkVersion: String = QaidSDK.version) {
+                sdkVersion: String = QaidSDK.version, bundleIdentifier: String = "") {
         self.platform = platform
         self.osVersion = osVersion
         self.model = model
@@ -27,6 +29,7 @@ public struct DeviceInfo: Equatable {
         self.screenWidth = screenWidth
         self.screenHeight = screenHeight
         self.sdkVersion = sdkVersion
+        self.bundleIdentifier = bundleIdentifier
     }
 
     public var userAgent: String {
@@ -34,8 +37,10 @@ public struct DeviceInfo: Equatable {
         return "\(appName)/\(appVersion) (\(build); \(os) \(osVersion); \(model)) QaidFeedback/\(sdkVersion)"
     }
 
-    public func metadata(screen: String?, source: String) -> [String: String] {
-        var out: [String: String] = [
+    /// The built-in keys stay flat, as 0.1 sent them; `user` and `custom` are nested and
+    /// left out when empty.
+    public func metadata(screen: String?, source: String, app: AppMetadata = AppMetadata()) -> [String: Any] {
+        var out: [String: Any] = [
             "platform": platform,
             "osVersion": osVersion,
             "device": model,
@@ -47,12 +52,14 @@ public struct DeviceInfo: Equatable {
             "source": source,
         ]
         if let screen, !screen.isEmpty { out["screen"] = screen }
+        if let user = app.user?.jsonObject { out["user"] = user }
+        if !app.custom.isEmpty { out["custom"] = app.custom }
         return out
     }
 }
 
 public enum QaidSDK {
-    public static let version = "0.1.0"
+    public static let version = "0.2.0"
 }
 
 /// A screenshot (or plain message) report, as the annotate page hands it back.
@@ -71,7 +78,14 @@ public struct ScreenshotSubmission: Equatable {
 }
 
 public enum FeedbackRequests {
-    /// The configured page URL, plus the screen as one more path segment.
+    /// The page URL a report goes out under: the configured one, or `app://<bundle id>`,
+    /// plus the screen.
+    public static func pageUrl(config: QaidConfiguration, device: DeviceInfo, screen: String?) -> String {
+        pageUrl(base: config.pageUrl ?? QaidConfiguration.defaultPageUrl(bundleIdentifier: device.bundleIdentifier),
+                screen: screen)
+    }
+
+    /// The base page URL, plus the screen as one more path segment.
     public static func pageUrl(base: URL, screen: String?) -> String {
         guard let screen, !slug(screen).isEmpty else { return base.absoluteString }
         var text = base.absoluteString
@@ -99,18 +113,20 @@ public enum FeedbackRequests {
     /// The JSON body for `POST /api/feedback`. `pageUrl` and `feedbackType` are the two
     /// fields the server requires; the API key travels in the body, as the web widget sends it.
     public static func jsonBody(config: QaidConfiguration, device: DeviceInfo, visitorId: String,
-                                submission: ScreenshotSubmission) -> [String: Any] {
+                                submission: ScreenshotSubmission, context: ReportContext = ReportContext()) -> [String: Any] {
         var body: [String: Any] = [
             "apiKey": config.apiKey,
             "feedbackType": submission.kind.rawValue,
-            "pageUrl": pageUrl(base: config.pageUrl, screen: submission.screen),
+            "pageUrl": pageUrl(config: config, device: device, screen: submission.screen),
             "message": BridgeCodec.clampMessage(submission.message),
             "visitorId": visitorId,
             "userAgent": device.userAgent,
             "screenWidth": device.screenWidth,
             "screenHeight": device.screenHeight,
-            "metadata": device.metadata(screen: submission.screen, source: "native"),
+            "metadata": device.metadata(screen: submission.screen, source: "native", app: context.app),
         ]
+        if !context.consoleErrors.isEmpty { body["consoleErrors"] = context.consoleErrors.map(\.jsonObject) }
+        if !context.networkErrors.isEmpty { body["networkErrors"] = context.networkErrors.map(\.jsonObject) }
         if let shot = submission.screenshot, BridgeCodec.isImageDataUrl(shot) {
             body["screenshot"] = shot
         }
@@ -121,33 +137,63 @@ public enum FeedbackRequests {
     }
 
     public static func jsonRequest(config: QaidConfiguration, device: DeviceInfo, visitorId: String,
-                                   submission: ScreenshotSubmission) throws -> URLRequest {
+                                   submission: ScreenshotSubmission, context: ReportContext = ReportContext()) throws -> URLRequest {
+        let body = try jsonData(jsonBody(config: config, device: device, visitorId: visitorId,
+                                         submission: submission, context: context))
+        return jsonRequest(config: config, device: device, body: body)
+    }
+
+    /// The request for a body built earlier — how a queued report is sent later.
+    public static func jsonRequest(config: QaidConfiguration, device: DeviceInfo, body: Data) -> URLRequest {
         var request = URLRequest(url: config.endpoint)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue(device.userAgent, forHTTPHeaderField: "User-Agent")
         request.timeoutInterval = 60
-        request.httpBody = try JSONSerialization.data(
-            withJSONObject: jsonBody(config: config, device: device, visitorId: visitorId, submission: submission),
-            options: [.sortedKeys]
-        )
+        request.httpBody = body
         return request
     }
 
+    public static func jsonData(_ object: Any) throws -> Data {
+        try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys, .withoutEscapingSlashes])
+    }
+
+    static func jsonString(_ object: Any) -> String {
+        (try? jsonData(object)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+    }
+
     /// The text fields of `POST /api/feedback/video`, in send order. The file goes last.
+    /// The `consoleErrors` / `networkErrors` arrays travel as JSON strings, like `metadata`.
     public static func videoFields(config: QaidConfiguration, device: DeviceInfo, visitorId: String,
-                                   message: String, screen: String?) -> [(String, String)] {
-        let meta = device.metadata(screen: screen, source: "native-recording")
-        let metaJson = (try? JSONSerialization.data(withJSONObject: meta, options: [.sortedKeys]))
-            .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-        return [
+                                   message: String, screen: String?,
+                                   context: ReportContext = ReportContext()) -> [(String, String)] {
+        let meta = device.metadata(screen: screen, source: "native-recording", app: context.app)
+        var fields = [
             ("apiKey", config.apiKey),
-            ("pageUrl", pageUrl(base: config.pageUrl, screen: screen)),
+            ("pageUrl", pageUrl(config: config, device: device, screen: screen)),
             ("message", BridgeCodec.clampMessage(message)),
             ("visitorId", visitorId),
-            ("metadata", metaJson),
+            ("metadata", jsonString(meta)),
         ]
+        if !context.consoleErrors.isEmpty {
+            fields.append(("consoleErrors", jsonString(context.consoleErrors.map(\.jsonObject))))
+        }
+        if !context.networkErrors.isEmpty {
+            fields.append(("networkErrors", jsonString(context.networkErrors.map(\.jsonObject))))
+        }
+        return fields
+    }
+
+    /// Video fields as a JSON array of `[name, value]` pairs, for the offline queue.
+    public static func encodeFields(_ fields: [(String, String)]) throws -> Data {
+        try jsonData(fields.map { [$0.0, $0.1] })
+    }
+
+    public static func decodeFields(_ data: Data) -> [(String, String)]? {
+        guard let pairs = (try? JSONSerialization.jsonObject(with: data)) as? [[String]],
+              pairs.allSatisfy({ $0.count == 2 }) else { return nil }
+        return pairs.map { ($0[0], $0[1]) }
     }
 
     /// Writes a multipart/form-data body to `destination`, streaming the video so a 48 MB
@@ -247,17 +293,19 @@ public enum QaidError: Error, Equatable {
         }
     }
 
-    /// Words for the person holding the phone.
-    public var userMessage: String {
+    /// Words for the person holding the phone, in English.
+    public var userMessage: String { userMessage(QaidText()) }
+
+    /// Words for the person holding the phone, in the app's own text.
+    public func userMessage(_ text: QaidText) -> String {
         switch self {
-        case .notConfigured: return "Feedback isn't set up in this build."
-        case .invalidApiKey, .domainNotAllowed, .projectArchived, .badRequest, .unexpected:
-            return "Feedback couldn't be delivered. The team has been told about the setup problem."
-        case .featureDisabled: return "Screen recordings aren't available for this app yet. Send a screenshot instead."
-        case .quotaExceeded: return "Feedback is full for this month. Please try again later."
-        case .tooLarge: return "The recording is too long to send. Try a shorter one."
-        case .server: return "The feedback service is having trouble."
-        case .network: return "You seem to be offline."
+        case .notConfigured: return text.errorNotConfigured
+        case .invalidApiKey, .domainNotAllowed, .projectArchived, .badRequest, .unexpected: return text.errorSetup
+        case .featureDisabled: return text.errorRecordingsOff
+        case .quotaExceeded: return text.errorQuota
+        case .tooLarge: return text.errorTooLarge
+        case .server: return text.errorServer
+        case .network: return text.errorOffline
         case .recording(let why): return why
         }
     }

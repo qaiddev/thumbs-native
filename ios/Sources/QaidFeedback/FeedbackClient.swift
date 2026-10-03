@@ -17,25 +17,24 @@ final class FeedbackClient {
         self.retry = retry
     }
 
-    func sendScreenshot(_ submission: ScreenshotSubmission) async throws -> String {
-        let request = try FeedbackRequests.jsonRequest(config: config, device: device,
-                                                       visitorId: VisitorId.current, submission: submission)
+    /// A finished `POST /api/feedback` body — built by the coordinator, or read back
+    /// from the offline queue.
+    func send(jsonBody: Data) async throws -> String {
+        let request = FeedbackRequests.jsonRequest(config: config, device: device, body: jsonBody)
         return try await withRetry {
-            let (data, response) = try await self.session.data(for: request)
-            return (data, response)
+            try await self.session.data(for: request)
         }
     }
 
-    func sendVideo(_ video: RecordedVideo, message: String, screen: String?) async throws -> String {
-        if video.sizeBytes > VideoPolicy.serverLimit { throw QaidError.tooLarge }
+    func send(videoFields: [(String, String)], videoURL: URL) async throws -> String {
+        let size = (try? videoURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        if size > VideoPolicy.serverLimit { throw QaidError.tooLarge }
         let boundary = "qaid-\(UUID().uuidString)"
         let body = FileManager.default.temporaryDirectory.appendingPathComponent("\(boundary).multipart")
         defer { try? FileManager.default.removeItem(at: body) }
         try FeedbackRequests.writeMultipart(
-            to: body, boundary: boundary,
-            fields: FeedbackRequests.videoFields(config: config, device: device, visitorId: VisitorId.current,
-                                                 message: message, screen: screen),
-            fileField: "video", fileURL: video.url, filename: "recording.mp4", mimeType: video.mimeType
+            to: body, boundary: boundary, fields: videoFields,
+            fileField: "video", fileURL: videoURL, filename: "recording.mp4", mimeType: "video/mp4"
         )
         let request = FeedbackRequests.videoRequest(config: config, device: device, boundary: boundary)
         return try await withRetry {
@@ -95,7 +94,8 @@ extension DeviceInfo {
             build: info["CFBundleVersion"] as? String ?? "0",
             locale: Locale.current.identifier,
             screenWidth: Int(bounds.width),
-            screenHeight: Int(bounds.height)
+            screenHeight: Int(bounds.height),
+            bundleIdentifier: Bundle.main.bundleIdentifier ?? ""
         )
     }
 

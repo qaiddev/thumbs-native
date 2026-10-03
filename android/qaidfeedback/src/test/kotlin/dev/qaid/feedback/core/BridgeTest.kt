@@ -25,6 +25,19 @@ class ConfigTest {
         assertEquals("http://10.0.2.2:4321/api/feedback/video", local.videoEndpoint)
     }
 
+    @Test fun questsBaseIsOnTheEndpointOrigin() {
+        assertEquals("https://qaid.dev/api/quests", config.questsBase)
+        assertEquals("http://10.0.2.2:4321/api/quests", QaidConfig.defaultQuestsBase("http://10.0.2.2:4321/api/feedback"))
+        assertEquals("https://qaid.dev/api/quests", QaidConfig.defaultQuestsBase("nope"))
+    }
+
+    @Test fun newOptionsDefaultOn() {
+        assertTrue(config.captureLogs)
+        assertTrue(config.maskSensitiveViews)
+        assertNull(config.quests)
+        assertEquals(QaidText(), config.text)
+    }
+
     @Test fun unreadableUrlsFallBack() {
         assertEquals("https://qaid.dev/native/annotate", QaidConfig.defaultAnnotateUrl("not a url"))
         assertEquals("https://qaid.dev/native/annotate", QaidConfig.defaultAnnotateUrl("/relative"))
@@ -71,6 +84,49 @@ class BridgeEncodeTest {
         assertEquals(2048, att.getLong("sizeBytes"))
         val unknown = JSONObject(Bridge.encode(InitMessage(BridgeTheme.DARK, NeonAccent.DARK, emptyList(), BridgeAttachment.Video(1.0, null), true, "W")))
         assertTrue(unknown.getJSONObject("attachment").isNull("sizeBytes"))
+    }
+
+    @Test fun initCarriesTheSharedText() {
+        val text = QaidText(title = "Avis").shared("CinemaCrew")
+        val json = JSONObject(Bridge.encode(InitMessage(BridgeTheme.DARK, NeonAccent.DARK, emptyList(), BridgeAttachment.None, false, "CinemaCrew", text = text)))
+        val sent = json.getJSONObject("text")
+        assertEquals("Avis", sent.getString("title"))
+        assertEquals("to the CinemaCrew team", sent.getString("subtitle"))
+        assertEquals(24, sent.length())
+        // Without text the page keeps its own English.
+        assertFalse(JSONObject(Bridge.encode(InitMessage(BridgeTheme.DARK, NeonAccent.DARK, emptyList(), BridgeAttachment.None, false, "W"))).has("text"))
+    }
+
+    @Test fun queuedIsAStatus() {
+        val json = JSONObject(Bridge.encode(StatusMessage(StatusMessage.State.QUEUED)))
+        assertEquals("status", json.getString("type"))
+        assertEquals("queued", json.getString("state"))
+        assertTrue(json.isNull("error"))
+    }
+
+    @Test fun questMessage() {
+        val meta = JSONObject().put("platform", "android").put("user", JSONObject().put("id", "u1"))
+        val json = JSONObject(Bridge.encode(QuestMessage("q_up", "https://qaid.dev/api/quests", "key_1", "app://com.x.y/home", "vis_1", meta)))
+        assertEquals(1, json.getInt("v"))
+        assertEquals("quest", json.getString("type"))
+        assertEquals("q_up", json.getString("questId"))
+        assertEquals("https://qaid.dev/api/quests", json.getString("base"))
+        assertEquals("key_1", json.getString("apiKey"))
+        assertEquals("app://com.x.y/home", json.getString("pageUrl"))
+        assertEquals("vis_1", json.getString("visitorId"))
+        assertEquals("u1", json.getJSONObject("metadata").getJSONObject("user").getString("id"))
+        assertEquals(setOf("v", "type", "questId", "base", "apiKey", "pageUrl", "visitorId", "metadata"), json.keys().asSequence().toSet())
+    }
+
+    @Test fun questLinksPickByKind() {
+        val links = QaidQuestLinks(up = "q_up", down = "q_down", video = "q_vid")
+        assertEquals("q_up", links.questFor(FeedbackKind.UP, isVideo = false))
+        assertEquals("q_down", links.questFor(FeedbackKind.DOWN, isVideo = false))
+        assertNull(links.questFor(FeedbackKind.NEUTRAL, isVideo = false))
+        assertEquals("q_vid", links.questFor(FeedbackKind.UP, isVideo = true))
+        assertEquals("q_vid", links.questFor(FeedbackKind.NEUTRAL, isVideo = true))
+        assertNull(QaidQuestLinks(up = "  ").questFor(FeedbackKind.UP, isVideo = false))
+        assertNull(QaidQuestLinks(up = "q").questFor(FeedbackKind.UP, isVideo = true))
     }
 
     @Test fun statusMessages() {

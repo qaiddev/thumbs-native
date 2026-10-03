@@ -20,6 +20,7 @@ import android.os.Looper
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.IntentCompat
+import dev.qaid.feedback.core.QaidText
 import java.io.File
 
 /**
@@ -34,6 +35,9 @@ class QaidRecordService : Service() {
     private var display: VirtualDisplay? = null
     private var output: File? = null
     private var finished = false
+    private var errorNotStarted = DEFAULT_TEXT.recordingNotStarted
+    private var errorFailed = DEFAULT_TEXT.recordingFailed
+    private var errorEmpty = DEFAULT_TEXT.recordingEmpty
     private val main = Handler(Looper.getMainLooper())
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -47,20 +51,23 @@ class QaidRecordService : Service() {
     }
 
     private fun begin(intent: Intent) {
+        intent.getStringExtra(EXTRA_ERROR_NOT_STARTED)?.let { errorNotStarted = it }
+        intent.getStringExtra(EXTRA_ERROR_FAILED)?.let { errorFailed = it }
+        intent.getStringExtra(EXTRA_ERROR_EMPTY)?.let { errorEmpty = it }
         // Foreground first: Android 14 refuses getMediaProjection() from a service that isn't.
         ServiceCompat.startForeground(
-            this, NOTIFICATION_ID, notification(),
+            this, NOTIFICATION_ID, notification(intent),
             if (Build.VERSION.SDK_INT >= 29) ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION else 0,
         )
         try {
             val code = intent.getIntExtra(EXTRA_RESULT_CODE, Activity.RESULT_CANCELED)
             val data = IntentCompat.getParcelableExtra(intent, EXTRA_DATA, Intent::class.java)
-                ?: return end("Recording wasn't started.")
+                ?: return end(errorNotStarted)
             val width = intent.getIntExtra(EXTRA_WIDTH, 720)
             val height = intent.getIntExtra(EXTRA_HEIGHT, 1280)
             val dpi = intent.getIntExtra(EXTRA_DPI, 320)
             val manager = getSystemService(MediaProjectionManager::class.java)
-            val projection = manager.getMediaProjection(code, data) ?: return end("Recording wasn't started.")
+            val projection = manager.getMediaProjection(code, data) ?: return end(errorNotStarted)
             this.projection = projection
             // Must be registered before the virtual display exists (Android 14).
             projection.registerCallback(object : MediaProjection.Callback() {
@@ -95,7 +102,7 @@ class QaidRecordService : Service() {
             )
             rec.start()
         } catch (e: Exception) {
-            end(e.message ?: "Recording couldn't start.")
+            end(errorFailed)
         }
     }
 
@@ -122,7 +129,7 @@ class QaidRecordService : Service() {
         if (failure != null) {
             file?.delete()
         } else if (file == null || file.length() == 0L) {
-            failure = "The recording was empty."
+            failure = errorEmpty
         }
         Recording.onServiceFinished(if (failure == null) file else null, failure)
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
@@ -134,23 +141,27 @@ class QaidRecordService : Service() {
         super.onDestroy()
     }
 
-    private fun notification(): Notification {
+    /** Every word on it comes from the app's QaidText, carried in the start intent. */
+    private fun notification(intent: Intent): Notification {
         val nm = getSystemService(NotificationManager::class.java)
-        if (Build.VERSION.SDK_INT >= 26 && nm.getNotificationChannel(CHANNEL) == null) {
-            nm.createNotificationChannel(
-                NotificationChannel(CHANNEL, "Screen recording for feedback", NotificationManager.IMPORTANCE_LOW),
-            )
-        }
+        // Re-created each time so the channel's name follows the app's language.
+        nm.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL,
+                intent.getStringExtra(EXTRA_CHANNEL_NAME) ?: DEFAULT_TEXT.recordingChannel,
+                NotificationManager.IMPORTANCE_LOW,
+            ),
+        )
         val stop = PendingIntent.getService(
             this, 0, Intent(this, QaidRecordService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         return NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.presence_video_online)
-            .setContentTitle("Recording the screen for feedback")
-            .setContentText("Tap Stop when you've shown the problem.")
+            .setContentTitle(intent.getStringExtra(EXTRA_TITLE) ?: DEFAULT_TEXT.recordingNotificationTitle)
+            .setContentText(intent.getStringExtra(EXTRA_TEXT) ?: DEFAULT_TEXT.recordingNotificationText)
             .setOngoing(true)
-            .addAction(0, "Stop", stop)
+            .addAction(0, intent.getStringExtra(EXTRA_STOP) ?: DEFAULT_TEXT.stop, stop)
             .setContentIntent(stop)
             .build()
     }
@@ -166,6 +177,14 @@ class QaidRecordService : Service() {
         const val EXTRA_BITRATE = "bitrate"
         const val EXTRA_MAX_BYTES = "maxBytes"
         const val EXTRA_MAX_SECONDS = "maxSeconds"
+        const val EXTRA_CHANNEL_NAME = "channelName"
+        const val EXTRA_TITLE = "title"
+        const val EXTRA_TEXT = "text"
+        const val EXTRA_STOP = "stop"
+        const val EXTRA_ERROR_NOT_STARTED = "errorNotStarted"
+        const val EXTRA_ERROR_FAILED = "errorFailed"
+        const val EXTRA_ERROR_EMPTY = "errorEmpty"
+        private val DEFAULT_TEXT = QaidText()
         private const val CHANNEL = "dev.qaid.feedback.recording"
         private const val NOTIFICATION_ID = 0x0a1d
     }

@@ -147,13 +147,13 @@ final class BridgeDecodingTests: XCTestCase {
 
 final class RequestBuilderTests: XCTestCase {
     func testPageUrlAppendsTheScreenSlug() {
-        XCTAssertEqual(FeedbackRequests.pageUrl(base: config.pageUrl, screen: nil),
+        XCTAssertEqual(FeedbackRequests.pageUrl(base: config.pageUrl!, screen: nil),
                        "https://cinemasetfree.com/app/cinemacrew-ios")
-        XCTAssertEqual(FeedbackRequests.pageUrl(base: config.pageUrl, screen: "Call Sheets"),
+        XCTAssertEqual(FeedbackRequests.pageUrl(base: config.pageUrl!, screen: "Call Sheets"),
                        "https://cinemasetfree.com/app/cinemacrew-ios/call-sheets")
         XCTAssertEqual(FeedbackRequests.pageUrl(base: URL(string: "https://a.com/x/")!, screen: "Home"),
                        "https://a.com/x/home")
-        XCTAssertEqual(FeedbackRequests.pageUrl(base: config.pageUrl, screen: "  !! "),
+        XCTAssertEqual(FeedbackRequests.pageUrl(base: config.pageUrl!, screen: "  !! "),
                        "https://cinemasetfree.com/app/cinemacrew-ios")
     }
 

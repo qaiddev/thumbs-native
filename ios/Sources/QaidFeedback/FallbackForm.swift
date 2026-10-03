@@ -5,11 +5,13 @@ import UIKit
 @MainActor
 final class FallbackModel: ObservableObject {
     let initMessage: InitMessage
+    let text: QaidText
     @Published var status: StatusMessage?
     @Published var includeScreenshot = true
 
-    init(initMessage: InitMessage) {
+    init(initMessage: InitMessage, text: QaidText) {
         self.initMessage = initMessage
+        self.text = text
     }
 }
 
@@ -26,6 +28,7 @@ struct FallbackForm: View {
     @State private var loaded = false
 
     private var msg: InitMessage { model.initMessage }
+    private var text: QaidText { model.text }
     private var positive: Color { Color(UIColor(hex: msg.accent.positive) ?? .systemGreen) }
     private var negative: Color { Color(UIColor(hex: msg.accent.negative) ?? .systemPink) }
     private var surface: Color { msg.theme == .dark ? Color(white: 0.07) : .white }
@@ -37,7 +40,8 @@ struct FallbackForm: View {
     }
 
     private var sending: Bool { model.status?.state == .sending }
-    private var sent: Bool { model.status?.state == .sent }
+    /// Sent, or saved for later: either way the report is out of the person's hands.
+    private var sent: Bool { model.status?.state == .sent || model.status?.state == .queued }
 
     var body: some View {
         NavigationView {
@@ -45,28 +49,37 @@ struct FallbackForm: View {
                 VStack(alignment: .leading, spacing: 14) {
                     attachment
                     HStack(spacing: 10) {
-                        neonToggle("Works well", systemImage: "hand.thumbsup", color: positive, on: kind == .up) {
+                        neonToggle(text.positive, systemImage: "hand.thumbsup", color: positive, on: kind == .up) {
                             kind = kind == .up ? .neutral : .up
                         }
-                        neonToggle("Not working", systemImage: "hand.thumbsdown", color: negative, on: kind == .down) {
+                        neonToggle(text.negative, systemImage: "hand.thumbsdown", color: negative, on: kind == .down) {
                             kind = kind == .down ? .neutral : .down
                         }
                     }
-                    Text("What happened?").font(.subheadline.weight(.semibold)).foregroundColor(.secondary)
+                    Text(text.messageLabel).font(.subheadline.weight(.semibold)).foregroundColor(.secondary)
                     TextEditor(text: $message)
                         .frame(minHeight: 130)
+                        .overlay(alignment: .topLeading) {
+                            if message.isEmpty {
+                                Text(text.placeholder)
+                                    .foregroundColor(Color(UIColor.placeholderText))
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 8)
+                                    .allowsHitTesting(false)
+                            }
+                        }
                         .padding(8)
                         .background(RoundedRectangle(cornerRadius: 14).fill(surface))
                         .overlay(RoundedRectangle(cornerRadius: 14).stroke(line, lineWidth: 1))
                     if let status = model.status {
                         Text(statusText(status))
                             .font(.footnote)
-                            .foregroundColor(status.state == .error ? negative : status.state == .sent ? positive : .secondary)
+                            .foregroundColor(status.state == .error ? negative : sent ? positive : .secondary)
                             .frame(maxWidth: .infinity)
                     }
                     if msg.canRecord && !sent {
                         Button { onRecord(kind == .neutral ? nil : kind, message) } label: {
-                            Label("Record screen instead", systemImage: "record.circle")
+                            Label(text.recordInstead, systemImage: "record.circle")
                                 .frame(maxWidth: .infinity, minHeight: 44)
                         }
                         .foregroundColor(negative)
@@ -75,14 +88,14 @@ struct FallbackForm: View {
                 }
                 .padding(16)
             }
-            .navigationTitle("Send feedback")
+            .navigationTitle(text.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(sent ? "Close" : "Cancel", action: onClose)
+                    Button(sent ? text.close : text.cancel, action: onClose)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(sent ? "Done" : "Send") {
+                    Button(sent ? text.done : text.send) {
                         if sent { onClose() } else {
                             onSubmit(kind, message, model.includeScreenshot ? screenshotURL : nil)
                         }
@@ -120,17 +133,17 @@ struct FallbackForm: View {
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                     .frame(maxWidth: .infinity)
             }
-            Toggle("Attach screenshot", isOn: $model.includeScreenshot).tint(positive)
+            Toggle(text.attachScreenshot, isOn: $model.includeScreenshot).tint(positive)
         case .video(let duration, let size):
             HStack(spacing: 12) {
                 Image(systemName: "record.circle").font(.title).foregroundColor(negative)
                 VStack(alignment: .leading) {
-                    Text("Screen recording").font(.headline)
+                    Text(text.screenRecording).font(.headline)
                     Text(videoMeta(duration: duration, size: size)).font(.subheadline).foregroundColor(.secondary)
                 }
             }
         case .none:
-            EmptyView()
+            Text(text.noScreenshot).font(.footnote).foregroundColor(.secondary)
         }
     }
 
@@ -150,9 +163,10 @@ struct FallbackForm: View {
 
     private func statusText(_ status: StatusMessage) -> String {
         switch status.state {
-        case .sending: return "Sending…"
-        case .sent: return "Sent. Thank you!"
-        case .error: return "\(status.error ?? "Could not send.") Tap Send to try again."
+        case .sending: return text.sending
+        case .sent: return text.sent
+        case .queued: return text.queued
+        case .error: return "\(status.error ?? text.errorGeneric) \(text.retry)"
         }
     }
 

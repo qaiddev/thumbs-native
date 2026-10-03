@@ -1,6 +1,7 @@
 package dev.qaid.feedback.core
 
 import okio.Buffer
+import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -11,7 +12,8 @@ import java.io.File
 
 private const val SHOT = "data:image/webp;base64,UklGRg=="
 
-private val config = QaidConfig(apiKey = "key_123", pageUrl = "https://cinemasetfree.com/app/cinemacrew-android", appName = "CinemaCrew")
+private const val BASE = "https://cinemasetfree.com/app/cinemacrew-android"
+private val config = QaidConfig(apiKey = "key_123", pageUrl = BASE, appName = "CinemaCrew")
 private val device = DeviceInfo(
     osVersion = "15", model = "Google Pixel 8", appName = "CinemaCrew", appVersion = "1.4",
     build = "812", locale = "en-US", screenWidth = 412, screenHeight = 915,
@@ -19,10 +21,10 @@ private val device = DeviceInfo(
 
 class PageUrlTest {
     @Test fun appendsTheScreenSlug() {
-        assertEquals("https://cinemasetfree.com/app/cinemacrew-android", FeedbackRequests.pageUrl(config.pageUrl, null))
-        assertEquals("https://cinemasetfree.com/app/cinemacrew-android/call-sheets", FeedbackRequests.pageUrl(config.pageUrl, "Call Sheets"))
+        assertEquals("https://cinemasetfree.com/app/cinemacrew-android", FeedbackRequests.pageUrl(BASE, null))
+        assertEquals("https://cinemasetfree.com/app/cinemacrew-android/call-sheets", FeedbackRequests.pageUrl(BASE, "Call Sheets"))
         assertEquals("https://a.com/x/home", FeedbackRequests.pageUrl("https://a.com/x/", "Home"))
-        assertEquals(config.pageUrl, FeedbackRequests.pageUrl(config.pageUrl, " !! "))
+        assertEquals(BASE, FeedbackRequests.pageUrl(BASE, " !! "))
     }
 
     @Test fun slug() {
@@ -32,9 +34,14 @@ class PageUrlTest {
     }
 }
 
+private fun context(screen: String? = null, source: String = FeedbackRequests.SOURCE_SCREENSHOT, logs: List<LogEntry> = emptyList(), network: List<NetworkErrorEntry> = emptyList()) =
+    FeedbackRequests.context(config, device, "com.cinemasetfree.crew", screen, source, consoleErrors = logs, networkErrors = network)
+
 class JsonRequestTest {
     @Test fun buildsTheFeedbackPost() {
-        val request = FeedbackRequests.jsonRequest(config, device, "vis_1", ScreenshotSubmission(FeedbackKind.DOWN, " broken ", SHOT, "Errands"))
+        val submission = ScreenshotSubmission(FeedbackKind.DOWN, " broken ", SHOT, "Errands")
+        val json = FeedbackRequests.jsonBody(config, device, "vis_1", submission, context("Errands")).toString()
+        val request = FeedbackRequests.jsonRequest(config.endpoint, device.userAgent, json)
         assertEquals("https://qaid.dev/api/feedback", request.url.toString())
         assertEquals("POST", request.method)
         assertEquals(device.userAgent, request.header("User-Agent"))
@@ -55,28 +62,79 @@ class JsonRequestTest {
         assertEquals("Errands", meta.getString("screen"))
         assertEquals("qaid-android/${QaidSdk.VERSION}", meta.getString("sdk"))
         assertEquals("native", meta.getString("source"))
+        // Nothing captured: the arrays are left out, not sent empty.
+        assertFalse(body.has("consoleErrors"))
+        assertFalse(body.has("networkErrors"))
+    }
+
+    @Test fun carriesLogsAndNetworkErrors() {
+        val logs = listOf(LogEntry("boom", 1_700_000_000_000, QaidLogLevel.ERROR))
+        val net = listOf(NetworkErrorEntry("https://api.example.com/v1/items", "GET", 503, "Service Unavailable", 1_700_000_000_001))
+        val body = FeedbackRequests.jsonBody(config, device, "v", ScreenshotSubmission(FeedbackKind.UP, "", null), context(logs = logs, network = net))
+        val log = body.getJSONArray("consoleErrors").getJSONObject(0)
+        assertEquals("boom", log.getString("message"))
+        assertEquals(1_700_000_000_000, log.getLong("timestamp"))
+        assertEquals("error", log.getString("level"))
+        val err = body.getJSONArray("networkErrors").getJSONObject(0)
+        assertEquals("https://api.example.com/v1/items", err.getString("url"))
+        assertEquals("GET", err.getString("method"))
+        assertEquals(503, err.getInt("status"))
+        assertEquals("Service Unavailable", err.getString("statusText"))
+        assertEquals(1_700_000_000_001, err.getLong("timestamp"))
     }
 
     @Test fun leavesOutAMissingOrUnsafeScreenshot() {
-        val none = FeedbackRequests.jsonBody(config, device, "v", ScreenshotSubmission(FeedbackKind.NEUTRAL, "hi", null))
+        val none = FeedbackRequests.jsonBody(config, device, "v", ScreenshotSubmission(FeedbackKind.NEUTRAL, "hi", null), context())
         assertFalse(none.has("screenshot"))
         assertFalse(none.has("elementText"))
         assertFalse(none.getJSONObject("metadata").has("screen"))
-        val unsafe = FeedbackRequests.jsonBody(config, device, "v", ScreenshotSubmission(FeedbackKind.UP, "", "http://x", ""))
+        val unsafe = FeedbackRequests.jsonBody(config, device, "v", ScreenshotSubmission(FeedbackKind.UP, "", "http://x", ""), context(""))
         assertFalse(unsafe.has("screenshot"))
         assertFalse(unsafe.has("elementText"))
+    }
+
+    @Test fun contextCapsTheLists() {
+        val logs = (1..80).map { LogEntry("l$it", it.toLong(), QaidLogLevel.LOG) }
+        val net = (1..30).map { NetworkErrorEntry("https://a.com/$it", "GET", 500, "", it.toLong()) }
+        val ctx = context(logs = logs, network = net)
+        assertEquals(50, ctx.consoleErrors.size)
+        assertEquals("l80", ctx.consoleErrors.last().message)
+        assertEquals(20, ctx.networkErrors.size)
+        assertEquals("https://a.com/30", ctx.networkErrors.last().url)
     }
 
     @Test fun userAgent() {
         assertEquals("CinemaCrew/1.4 (812; Android 15; Google Pixel 8) QaidFeedback/${QaidSdk.VERSION}", device.userAgent)
         assertTrue(device.copy(platform = "fireos").userAgent.contains("fireos 15"))
     }
+
+    @Test fun versionIs020() {
+        assertEquals("0.2.0", QaidSdk.VERSION)
+    }
+}
+
+class DefaultPageUrlTest {
+    private val noPage = QaidConfig(apiKey = "k", appName = "CinemaCrew")
+
+    @Test fun withoutAPageUrlItIsTheAppScheme() {
+        assertNull(noPage.pageUrl)
+        assertEquals("app://com.cinemasetfree.crew", noPage.pageUrlBase("com.cinemasetfree.crew"))
+        assertEquals("app://com.cinemasetfree.crew", noPage.copy(pageUrl = "  ").pageUrlBase("com.cinemasetfree.crew"))
+        assertEquals("app://com.cinemasetfree.crew", noPage.pageUrlBase("com.CinemaSetFree.Crew"))
+        val ctx = FeedbackRequests.context(noPage, device, "com.cinemasetfree.crew", "Call Sheets", FeedbackRequests.SOURCE_SCREENSHOT)
+        assertEquals("app://com.cinemasetfree.crew/call-sheets", ctx.pageUrl)
+    }
+
+    @Test fun aSetPageUrlWins() {
+        assertEquals(config.pageUrl, config.pageUrlBase("com.cinemasetfree.crew"))
+    }
 }
 
 class VideoRequestTest {
     @Test fun buildsTheMultipartUpload() {
         val video = File.createTempFile("qaid-test", ".mp4").apply { writeText("MP4DATA"); deleteOnExit() }
-        val request = FeedbackRequests.videoRequest(config, device, "vis_1", video, "  it froze ", null, boundary = "BOUND")
+        val fields = FeedbackRequests.videoFields(config, "vis_1", "  it froze ", context(source = FeedbackRequests.SOURCE_RECORDING))
+        val request = FeedbackRequests.videoRequest(config.videoEndpoint, device.userAgent, fields, video, boundary = "BOUND")
         assertEquals("https://qaid.dev/api/feedback/video", request.url.toString())
         assertEquals("multipart/form-data; boundary=BOUND", request.body!!.contentType().toString())
 
@@ -91,10 +149,18 @@ class VideoRequestTest {
         // The file goes last, after every text field.
         assertTrue(text.indexOf("name=\"video\"") > text.indexOf("name=\"metadata\""))
 
-        val fields = FeedbackRequests.videoFields(config, device, "vis_1", "x", "Camera")
-        assertEquals(listOf("apiKey", "pageUrl", "message", "visitorId", "metadata"), fields.map { it.first })
-        assertEquals("https://cinemasetfree.com/app/cinemacrew-android/camera", fields[1].second)
-        assertEquals("native-recording", JSONObject(fields[4].second).getString("source"))
+        val camera = FeedbackRequests.videoFields(config, "vis_1", "x", context("Camera", FeedbackRequests.SOURCE_RECORDING))
+        assertEquals(listOf("apiKey", "pageUrl", "message", "visitorId", "metadata"), camera.map { it.first })
+        assertEquals("https://cinemasetfree.com/app/cinemacrew-android/camera", camera[1].second)
+        assertEquals("native-recording", JSONObject(camera[4].second).getString("source"))
+    }
+
+    @Test fun diagnosticsGoAsJsonStrings() {
+        val logs = listOf(LogEntry("W: slow", 5, QaidLogLevel.WARN))
+        val net = listOf(NetworkErrorEntry("https://a.com/x", "POST", 0, "UnknownHostException", 6))
+        val fields = FeedbackRequests.videoFields(config, "v", "", context(logs = logs, network = net)).toMap()
+        assertEquals("warn", JSONArray(fields.getValue("consoleErrors")).getJSONObject(0).getString("level"))
+        assertEquals(0, JSONArray(fields.getValue("networkErrors")).getJSONObject(0).getInt("status"))
     }
 }
 
@@ -136,6 +202,20 @@ class ResponseTest {
         )
         all.forEach { assertTrue(it.userMessage.isNotEmpty()) }
         assertEquals("Stopped.", QaidError.Recording("Stopped.").userMessage)
+    }
+
+    @Test fun errorWordsComeFromQaidText() {
+        val fr = QaidText(errorOffline = "Hors ligne.", errorServer = "Panne.", errorSetup = "Config.", errorQuota = "Plein.",
+            errorTooLarge = "Trop long.", errorRecordingsOff = "Pas de vidéo.", errorNotConfigured = "Pas prêt.")
+        assertEquals("Hors ligne.", QaidError.Network("x").userMessage(fr))
+        assertEquals("Panne.", QaidError.Server(502).userMessage(fr))
+        assertEquals("Config.", QaidError.InvalidApiKey.userMessage(fr))
+        assertEquals("Config.", QaidError.BadRequest("x").userMessage(fr))
+        assertEquals("Plein.", QaidError.QuotaExceeded.userMessage(fr))
+        assertEquals("Trop long.", QaidError.TooLarge.userMessage(fr))
+        assertEquals("Pas de vidéo.", QaidError.FeatureDisabled("videoRecording").userMessage(fr))
+        assertEquals("Pas prêt.", QaidError.NotConfigured.userMessage(fr))
+        assertEquals(QaidText().errorOffline, QaidError.Network("x").userMessage)
     }
 }
 

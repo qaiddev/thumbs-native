@@ -6,15 +6,16 @@ import java.net.URI
  * Everything the SDK needs to know about the qaid project it reports to.
  *
  * [pageUrl] is what qaid stores as the feedback's URL and checks against the project's
- * Domain Restriction, so it must sit on the restricted host (or a subdomain of it). Make
- * it say which app and platform the report came from, e.g.
- * `https://example.com/app/myapp-android`; a screen name passed to `present` is appended
- * as one more path segment.
+ * Domain Restriction. Leave it null and reports use `app://<package name>`, which the
+ * server reads as a reversed domain: `app://com.example.myapp` passes a restriction of
+ * `example.com`. Set it to put reports under a web URL instead, e.g.
+ * `https://example.com/app/myapp-android`. Either way a screen name passed to `present`
+ * (or [dev.qaid.feedback.QaidFeedback.setScreen]) is appended as one more path segment.
  */
 data class QaidConfig(
-    /** The project's embed API key — the same one the web widget uses. */
+    /** The project's embed API key — the same one the web embed uses. */
     val apiKey: String,
-    val pageUrl: String,
+    val pageUrl: String? = null,
     /** Shown on the sheet: "to the <appName> team". */
     val appName: String,
     /** `https://qaid.dev/api/feedback`. The video endpoint is `<endpoint>/video`. */
@@ -31,20 +32,45 @@ data class QaidConfig(
     val maxVideoBytes: Long = 48L * 1024 * 1024,
     /** A recording stops itself after this long. */
     val maxRecordingSeconds: Int = 180,
+    /** Every visible string, for apps that are not in English. */
+    val text: QaidText = QaidText(),
+    /** Quests to show after a report is sent, by kind. */
+    val quests: QaidQuestLinks? = null,
+    /** Where the page loads a linked quest from; `/api/quests` on the endpoint's origin by default. */
+    val questsBase: String = defaultQuestsBase(endpoint),
+    /** Attach the app's own recent warnings and errors from logcat to a report. */
+    val captureLogs: Boolean = true,
+    /**
+     * Black out sensitive views in screenshots and recordings: views passed to
+     * `markSensitive`, and password fields. False turns masking off entirely.
+     */
+    val maskSensitiveViews: Boolean = true,
 ) {
     val videoEndpoint: String get() = endpoint.trimEnd('/') + "/video"
 
     /** Bridge messages from any other origin are dropped. */
     val annotateOrigin: String get() = originOf(annotateUrl)
 
+    /** [pageUrl], or `app://<packageName>` (lower case, as iOS sends its bundle id) when the app set none. */
+    fun pageUrlBase(packageName: String): String =
+        pageUrl?.takeIf { it.isNotBlank() } ?: "app://${packageName.lowercase()}"
+
+    /** URL prefixes the SDK itself calls, which are never recorded as the app's network errors. */
+    val ownUrlPrefixes: List<String>
+        get() = listOf(endpoint, annotateUrl, questsBase).map { NetworkErrors.stripQuery(it).trimEnd('/') }
+
     companion object {
         /** Bright marker colours, drawn ON the screenshot, so the same in both themes. */
         val DEFAULT_PALETTE = listOf("#ff0066", "#00ff88", "#00e5ff", "#ffe600", "#ffffff", "#111827")
 
-        fun defaultAnnotateUrl(endpoint: String): String {
-            val uri = runCatching { URI(endpoint) }.getOrNull() ?: return "https://qaid.dev/native/annotate"
-            if (uri.scheme == null || uri.host == null) return "https://qaid.dev/native/annotate"
-            return URI(uri.scheme, null, uri.host, uri.port, "/native/annotate", null, null).toString()
+        fun defaultAnnotateUrl(endpoint: String): String = onOrigin(endpoint, "/native/annotate")
+
+        fun defaultQuestsBase(endpoint: String): String = onOrigin(endpoint, "/api/quests")
+
+        private fun onOrigin(endpoint: String, path: String): String {
+            val uri = runCatching { URI(endpoint) }.getOrNull() ?: return "https://qaid.dev$path"
+            if (uri.scheme == null || uri.host == null) return "https://qaid.dev$path"
+            return URI(uri.scheme, null, uri.host, uri.port, path, null, null).toString()
         }
 
         /** `scheme://host[:port]`, lower case — the form a WebView reports an origin in. */
@@ -54,5 +80,20 @@ data class QaidConfig(
             val host = uri.host?.lowercase() ?: return ""
             return if (uri.port == -1) "$scheme://$host" else "$scheme://$host:${uri.port}"
         }
+    }
+}
+
+/**
+ * qaid quest ids to open after a report goes through: [up] / [down] for a screenshot or
+ * plain report with that thumb, [video] for a recording. A report with no thumb gets none.
+ */
+data class QaidQuestLinks(val up: String? = null, val down: String? = null, val video: String? = null) {
+    fun questFor(kind: FeedbackKind, isVideo: Boolean): String? {
+        val id = if (isVideo) video else when (kind) {
+            FeedbackKind.UP -> up
+            FeedbackKind.DOWN -> down
+            FeedbackKind.NEUTRAL -> null
+        }
+        return id?.trim()?.takeIf { it.isNotEmpty() }
     }
 }

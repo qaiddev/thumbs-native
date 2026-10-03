@@ -97,6 +97,13 @@ final class FeedbackSheetController: UIViewController, WKNavigationDelegate {
         }
     }
 
+    /// Hands a linked quest to the page. The fallback form has no quest view, so there
+    /// the person simply taps Done as before.
+    func show(_ quest: QuestMessage) {
+        guard fallback == nil, pageReady else { return }
+        deliver(BridgeCodec.encode(quest))
+    }
+
     private func deliver(_ json: String) {
         webView?.evaluateJavaScript(BridgeCodec.deliveryScript(json), completionHandler: nil)
     }
@@ -178,7 +185,7 @@ final class FeedbackSheetController: UIViewController, WKNavigationDelegate {
         webView?.removeFromSuperview()
         webView = nil
 
-        let model = FallbackModel(initMessage: initMessage)
+        let model = FallbackModel(initMessage: initMessage, text: config.text)
         fallback = model
         let form = FallbackForm(model: model,
                                 onSubmit: { [weak self] kind, text, shot in

@@ -1,4 +1,5 @@
-// Standalone build for the qaid feedback Android library — for its own unit tests.
+// Standalone build for the qaid feedback Android library — its unit tests, and the
+// `dev.qaid:feedback` release to Maven Central (see build.gradle.kts).
 //
 // An app consumes the module by SOURCE, not through this build: it includes
 // `:qaidfeedback` with `projectDir` pointing here, so the module compiles with the app's

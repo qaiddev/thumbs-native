@@ -16,15 +16,24 @@ import kotlin.math.roundToInt
  * Compose, SurfaceViews and hardware layers all come out as drawn. No permission needed.
  */
 internal object ScreenCapture {
-    fun capture(activity: Activity, done: (Bitmap?) -> Unit) {
+    /**
+     * @param mask black out sensitive views ([SensitiveViews]) before the bitmap is handed
+     *   on, so the unmasked pixels never reach the page or the upload.
+     */
+    fun capture(activity: Activity, mask: Boolean, done: (Bitmap?) -> Unit) {
         val window = activity.window
         val view = window.decorView
         if (view.width <= 0 || view.height <= 0) return done(null)
         val bitmap = runCatching { Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888) }
             .getOrElse { return done(null) }
+        // Measured now, on the frame PixelCopy is about to copy.
+        val boxes = if (mask) SensitiveViews.windowRects(view, auto = true) else emptyList()
         try {
             PixelCopy.request(window, bitmap, { result ->
-                if (result == PixelCopy.SUCCESS) done(bitmap) else {
+                if (result == PixelCopy.SUCCESS) {
+                    SensitiveViews.paint(bitmap, boxes, view)
+                    done(bitmap)
+                } else {
                     bitmap.recycle()
                     done(null)
                 }

@@ -10,7 +10,7 @@ import java.io.File
 import kotlin.math.roundToInt
 
 object QaidSdk {
-    const val VERSION = "0.1.0"
+    const val VERSION = "0.2.0"
 }
 
 /**
@@ -31,19 +31,6 @@ data class DeviceInfo(
 ) {
     val userAgent: String
         get() = "$appName/$appVersion ($build; ${if (platform == "android") "Android" else platform} $osVersion; $model) QaidFeedback/$sdkVersion"
-
-    fun metadata(screen: String?, source: String): Map<String, String> = buildMap {
-        put("platform", platform)
-        put("osVersion", osVersion)
-        put("device", model)
-        put("app", appName)
-        put("appVersion", appVersion)
-        put("build", build)
-        put("locale", locale)
-        put("sdk", "qaid-$platform/$sdkVersion")
-        put("source", source)
-        if (!screen.isNullOrEmpty()) put("screen", screen)
-    }
 }
 
 /** A screenshot (or plain message) report, as the annotate page hands it back. */
@@ -54,8 +41,22 @@ data class ScreenshotSubmission(
     val screen: String? = null,
 )
 
+/**
+ * Everything about a report that isn't the person's own words, gathered once at Send so
+ * the upload, the offline queue and a linked quest all carry the same page and metadata.
+ */
+data class ReportContext(
+    /** The full page URL, screen segment included. */
+    val pageUrl: String,
+    val metadata: JSONObject,
+    val consoleErrors: List<LogEntry> = emptyList(),
+    val networkErrors: List<NetworkErrorEntry> = emptyList(),
+)
+
 object FeedbackRequests {
     private val JSON = "application/json; charset=utf-8".toMediaType()
+    const val SOURCE_SCREENSHOT = "native"
+    const val SOURCE_RECORDING = "native-recording"
 
     /** The configured page URL, plus the screen as one more path segment. */
     fun pageUrl(base: String, screen: String?): String {
@@ -79,60 +80,85 @@ object FeedbackRequests {
         return out.toString().take(60)
     }
 
+    fun context(
+        config: QaidConfig,
+        device: DeviceInfo,
+        packageName: String,
+        screen: String?,
+        source: String,
+        user: QaidUser? = null,
+        custom: Map<String, String> = emptyMap(),
+        consoleErrors: List<LogEntry> = emptyList(),
+        networkErrors: List<NetworkErrorEntry> = emptyList(),
+    ) = ReportContext(
+        pageUrl = pageUrl(config.pageUrlBase(packageName), screen),
+        metadata = ReportMetadata.build(device, screen, source, user, custom),
+        consoleErrors = consoleErrors.takeLast(ConsoleLogs.MAX_ENTRIES),
+        networkErrors = networkErrors.takeLast(NetworkErrors.MAX_ENTRIES),
+    )
+
     /**
      * The JSON body for `POST /api/feedback`. `pageUrl` and `feedbackType` are the two
-     * fields the server requires; the API key travels in the body, as the web widget sends it.
+     * fields the server requires; the API key travels in the body, as the web embed sends it.
      */
-    fun jsonBody(config: QaidConfig, device: DeviceInfo, visitorId: String, submission: ScreenshotSubmission): JSONObject =
-        JSONObject().apply {
-            put("apiKey", config.apiKey)
-            put("feedbackType", submission.kind.wire)
-            put("pageUrl", pageUrl(config.pageUrl, submission.screen))
-            put("message", Bridge.clampMessage(submission.message))
-            put("visitorId", visitorId)
-            put("userAgent", device.userAgent)
-            put("screenWidth", device.screenWidth)
-            put("screenHeight", device.screenHeight)
-            put("metadata", JSONObject(device.metadata(submission.screen, "native")))
-            submission.screenshot?.takeIf(Bridge::isImageDataUrl)?.let { put("screenshot", it) }
-            submission.screen?.takeIf { it.isNotEmpty() }?.let { put("elementText", it) }
-        }
-
-    fun jsonRequest(config: QaidConfig, device: DeviceInfo, visitorId: String, submission: ScreenshotSubmission): Request =
-        Request.Builder()
-            .url(config.endpoint)
-            .header("Accept", "application/json")
-            .header("User-Agent", device.userAgent)
-            .post(jsonBody(config, device, visitorId, submission).toString().toRequestBody(JSON))
-            .build()
-
-    /** The text fields of `POST /api/feedback/video`, in send order. The file goes last. */
-    fun videoFields(config: QaidConfig, device: DeviceInfo, visitorId: String, message: String, screen: String?): List<Pair<String, String>> =
-        listOf(
-            "apiKey" to config.apiKey,
-            "pageUrl" to pageUrl(config.pageUrl, screen),
-            "message" to Bridge.clampMessage(message),
-            "visitorId" to visitorId,
-            "metadata" to JSONObject(device.metadata(screen, "native-recording")).toString(),
-        )
-
-    fun videoRequest(
+    fun jsonBody(
         config: QaidConfig,
         device: DeviceInfo,
         visitorId: String,
+        submission: ScreenshotSubmission,
+        context: ReportContext,
+    ): JSONObject = JSONObject().apply {
+        put("apiKey", config.apiKey)
+        put("feedbackType", submission.kind.wire)
+        put("pageUrl", context.pageUrl)
+        put("message", Bridge.clampMessage(submission.message))
+        put("visitorId", visitorId)
+        put("userAgent", device.userAgent)
+        put("screenWidth", device.screenWidth)
+        put("screenHeight", device.screenHeight)
+        put("metadata", context.metadata)
+        if (context.consoleErrors.isNotEmpty()) put("consoleErrors", ConsoleLogs.toJson(context.consoleErrors))
+        if (context.networkErrors.isNotEmpty()) put("networkErrors", NetworkErrors.toJson(context.networkErrors))
+        submission.screenshot?.takeIf(Bridge::isImageDataUrl)?.let { put("screenshot", it) }
+        submission.screen?.takeIf { it.isNotEmpty() }?.let { put("elementText", it) }
+    }
+
+    /** A ready JSON body to [endpoint] — a fresh report or one from the offline queue. */
+    fun jsonRequest(endpoint: String, userAgent: String, body: String): Request =
+        Request.Builder()
+            .url(endpoint)
+            .header("Accept", "application/json")
+            .header("User-Agent", userAgent)
+            .post(body.toRequestBody(JSON))
+            .build()
+
+    /** The text fields of `POST /api/feedback/video`, in send order. The file goes last. */
+    fun videoFields(config: QaidConfig, visitorId: String, message: String, context: ReportContext): List<Pair<String, String>> =
+        buildList {
+            add("apiKey" to config.apiKey)
+            add("pageUrl" to context.pageUrl)
+            add("message" to Bridge.clampMessage(message))
+            add("visitorId" to visitorId)
+            add("metadata" to context.metadata.toString())
+            if (context.consoleErrors.isNotEmpty()) add("consoleErrors" to ConsoleLogs.toJson(context.consoleErrors).toString())
+            if (context.networkErrors.isNotEmpty()) add("networkErrors" to NetworkErrors.toJson(context.networkErrors).toString())
+        }
+
+    fun videoRequest(
+        videoEndpoint: String,
+        userAgent: String,
+        fields: List<Pair<String, String>>,
         video: File,
-        message: String,
-        screen: String?,
         boundary: String = "qaid-" + java.util.UUID.randomUUID().toString(),
     ): Request {
         val body = MultipartBody.Builder(boundary).setType(MultipartBody.FORM).apply {
-            for ((name, value) in videoFields(config, device, visitorId, message, screen)) addFormDataPart(name, value)
+            for ((name, value) in fields) addFormDataPart(name, value)
             addFormDataPart("video", "recording.mp4", video.asRequestBody("video/mp4".toMediaType()))
         }.build()
         return Request.Builder()
-            .url(config.videoEndpoint)
+            .url(videoEndpoint)
             .header("Accept", "application/json")
-            .header("User-Agent", device.userAgent)
+            .header("User-Agent", userAgent)
             .post(body)
             .build()
     }
@@ -187,19 +213,21 @@ sealed class QaidError(message: String) : Exception(message) {
     /** Worth trying again by itself: the network or the server, never the request. */
     val isRetryable: Boolean get() = this is Network || this is Server
 
-    /** Words for the person holding the phone. */
-    val userMessage: String
-        get() = when (this) {
-            NotConfigured -> "Feedback isn't set up in this build."
-            InvalidApiKey, DomainNotAllowed, ProjectArchived, is BadRequest, is Unexpected ->
-                "Feedback couldn't be delivered. The team has been told about the setup problem."
-            is FeatureDisabled -> "Screen recordings aren't available for this app yet. Send a screenshot instead."
-            QuotaExceeded -> "Feedback is full for this month. Please try again later."
-            TooLarge -> "The recording is too long to send. Try a shorter one."
-            is Server -> "The feedback service is having trouble."
-            is Network -> "You seem to be offline."
-            is Recording -> detail
-        }
+    /** Words for the person holding the phone, in English. */
+    val userMessage: String get() = userMessage(QaidText())
+
+    /** Words for the person holding the phone, from the app's [QaidText]. */
+    fun userMessage(text: QaidText): String = when (this) {
+        NotConfigured -> text.errorNotConfigured
+        InvalidApiKey, DomainNotAllowed, ProjectArchived, is BadRequest, is Unexpected -> text.errorSetup
+        is FeatureDisabled -> text.errorRecordingsOff
+        QuotaExceeded -> text.errorQuota
+        TooLarge -> text.errorTooLarge
+        is Server -> text.errorServer
+        is Network -> text.errorOffline
+        // Already in the app's words: Recording is built from QaidText.
+        is Recording -> detail
+    }
 }
 
 /** How often and how long to wait before trying an upload again. */

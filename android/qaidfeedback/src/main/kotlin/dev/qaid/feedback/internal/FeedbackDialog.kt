@@ -40,6 +40,7 @@ import dev.qaid.feedback.core.FeedbackKind
 import dev.qaid.feedback.core.InitMessage
 import dev.qaid.feedback.core.PageMessage
 import dev.qaid.feedback.core.QaidConfig
+import dev.qaid.feedback.core.QuestMessage
 import dev.qaid.feedback.core.StatusMessage
 
 /**
@@ -59,6 +60,7 @@ internal class FeedbackDialog(
     else android.R.style.Theme_Material_Light_NoActionBar,
 ) {
     private val dark = init.theme == BridgeTheme.DARK
+    private val strings = config.text
     private val bg = if (dark) Color.rgb(10, 10, 10) else Color.rgb(243, 244, 246)
     private val ink = if (dark) Color.rgb(245, 245, 245) else Color.rgb(17, 24, 39)
     private val muted = if (dark) Color.rgb(163, 163, 163) else Color.rgb(75, 85, 99)
@@ -169,6 +171,11 @@ internal class FeedbackDialog(
         fallback?.status(status) ?: deliver(Bridge.encode(status))
     }
 
+    /** A linked quest for the page to show; the offline form has nowhere to show one. */
+    fun showQuest(quest: QuestMessage) {
+        if (fallback == null && pageReady) deliver(Bridge.encode(quest))
+    }
+
     override fun dismiss() {
         dismissed = true
         handler.removeCallbacks(readyTimeout)
@@ -213,9 +220,9 @@ internal class FeedbackDialog(
                 setPadding(dp(16), dp(8), dp(16), dp(16))
             }
             val bar = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
-            val cancel = text("Cancel", muted, 16f, bold = true).apply { setOnClickListener { listener.onFinish() } }
-            val title = text("Send feedback", ink, 17f, bold = true).apply { gravity = Gravity.CENTER }
-            send = text("Send", positive, 16f, bold = true).apply {
+            val cancel = label(strings.cancel, muted, 16f, bold = true).apply { setOnClickListener { listener.onFinish() } }
+            val title = label(strings.title, ink, 17f, bold = true).apply { gravity = Gravity.CENTER }
+            send = label(strings.send, positive, 16f, bold = true).apply {
                 setOnClickListener {
                     if (sent) listener.onFinish()
                     else listener.onSubmit(kind, message.text.toString(), if (attach?.isChecked != false) screenshotUrl else null)
@@ -239,7 +246,7 @@ internal class FeedbackDialog(
                         }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
                     }
                     attach = CheckBox(context).apply {
-                        text = "Attach screenshot"
+                        text = strings.attachScreenshot
                         isChecked = true
                         setTextColor(ink)
                         buttonTintList = android.content.res.ColorStateList.valueOf(positive)
@@ -248,25 +255,25 @@ internal class FeedbackDialog(
                 }
                 is BridgeAttachment.Video -> {
                     val whole = a.durationSec.toInt()
-                    column.addView(text(String.format(java.util.Locale.US, "●  Screen recording · %d:%02d", whole / 60, whole % 60), negative, 16f, bold = true),
+                    column.addView(label(String.format(java.util.Locale.US, "●  %s · %d:%02d", strings.screenRecording, whole / 60, whole % 60), negative, 16f, bold = true),
                         LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
                 }
                 BridgeAttachment.None -> Unit
             }
 
             val kinds = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
-            up = pill("Works well", positive).apply { setOnClickListener { setKind(if (kind == FeedbackKind.UP) FeedbackKind.NEUTRAL else FeedbackKind.UP) } }
-            down = pill("Not working", negative).apply { setOnClickListener { setKind(if (kind == FeedbackKind.DOWN) FeedbackKind.NEUTRAL else FeedbackKind.DOWN) } }
+            up = pill(strings.positive, positive).apply { setOnClickListener { setKind(if (kind == FeedbackKind.UP) FeedbackKind.NEUTRAL else FeedbackKind.UP) } }
+            down = pill(strings.negative, negative).apply { setOnClickListener { setKind(if (kind == FeedbackKind.DOWN) FeedbackKind.NEUTRAL else FeedbackKind.DOWN) } }
             kinds.addView(up, LinearLayout.LayoutParams(0, dp(46), 1f).apply { rightMargin = dp(5) })
             kinds.addView(down, LinearLayout.LayoutParams(0, dp(46), 1f).apply { leftMargin = dp(5) })
             column.addView(kinds, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(14) })
 
-            column.addView(text("What happened?", muted, 14f, bold = true), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(14) })
+            column.addView(label(strings.messageLabel, muted, 14f, bold = true), LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(14) })
             message = EditText(context).apply {
                 setText(init.message)
                 setTextColor(ink)
                 setHintTextColor(muted)
-                hint = "Tell us what you tried and what you expected."
+                hint = strings.placeholder
                 inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
                 minLines = 4
                 gravity = Gravity.TOP
@@ -279,11 +286,11 @@ internal class FeedbackDialog(
             }
             column.addView(message, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(6) })
 
-            statusText = text("", muted, 14f).apply { gravity = Gravity.CENTER }
+            statusText = label("", muted, 14f).apply { gravity = Gravity.CENTER }
             column.addView(statusText, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
 
             if (init.canRecord) {
-                val record = pill("●  Record screen instead", negative).apply {
+                val record = pill("●  " + strings.recordInstead, negative).apply {
                     setOnClickListener { listener.onRecord(if (kind == FeedbackKind.NEUTRAL) null else kind, message.text.toString()) }
                 }
                 column.addView(record, LinearLayout.LayoutParams(-1, dp(46)).apply { topMargin = dp(10) })
@@ -299,19 +306,19 @@ internal class FeedbackDialog(
             when (status.state) {
                 StatusMessage.State.SENDING -> {
                     statusText.setTextColor(muted)
-                    statusText.text = "Sending…"
+                    statusText.text = strings.sending
                     send.isEnabled = false
                 }
-                StatusMessage.State.SENT -> {
+                StatusMessage.State.SENT, StatusMessage.State.QUEUED -> {
                     sent = true
                     statusText.setTextColor(positive)
-                    statusText.text = "Sent. Thank you!"
-                    send.text = "Done"
+                    statusText.text = if (status.state == StatusMessage.State.SENT) strings.sent else strings.queued
+                    send.text = strings.done
                     send.isEnabled = true
                 }
                 StatusMessage.State.ERROR -> {
                     statusText.setTextColor(negative)
-                    statusText.text = "${status.error ?: "Could not send."} Tap Send to try again."
+                    statusText.text = "${status.error ?: strings.couldNotSend} ${strings.retry}"
                     send.isEnabled = true
                 }
             }
@@ -323,14 +330,14 @@ internal class FeedbackDialog(
             style(down, negative, next == FeedbackKind.DOWN)
         }
 
-        private fun text(value: String, color: Int, sp: Float, bold: Boolean = false) = TextView(context).apply {
+        private fun label(value: String, color: Int, sp: Float, bold: Boolean = false) = TextView(context).apply {
             text = value
             setTextColor(color)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, sp)
             if (bold) typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         }
 
-        private fun pill(value: String, color: Int) = text(value, color, 15f, bold = true).apply {
+        private fun pill(value: String, color: Int) = label(value, color, 15f, bold = true).apply {
             gravity = Gravity.CENTER
             isClickable = true
             style(this, color, false)

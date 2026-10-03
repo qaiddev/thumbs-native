@@ -4,7 +4,7 @@ import Foundation
 /// `qaid.dev/src/lib/native-bridge.ts`; the two must agree field for field.
 ///
 ///   app → page   `window.qaidNative.receive(<json>)` via `evaluateJavaScript`:
-///                `init`, `status`.
+///                `init`, `status`, `quest`.
 ///   page → app   `window.webkit.messageHandlers.qaid.postMessage(<json string>)`:
 ///                `ready`, `submit`, `record`, `cancel`, `close`, `error`.
 ///
@@ -78,9 +78,12 @@ public struct InitMessage: Encodable, Equatable {
     public var appName: String
     public var feedbackType: FeedbackKind?
     public var message: String
+    /// The shared `QaidText` keys; left out when nil, and the page keeps its English.
+    public var text: [String: String]?
 
     public init(theme: BridgeTheme, accent: NeonAccent, palette: [String], attachment: BridgeAttachment,
-                canRecord: Bool, appName: String, feedbackType: FeedbackKind? = nil, message: String = "") {
+                canRecord: Bool, appName: String, feedbackType: FeedbackKind? = nil, message: String = "",
+                text: [String: String]? = nil) {
         self.theme = theme
         self.accent = accent
         self.palette = palette
@@ -89,10 +92,11 @@ public struct InitMessage: Encodable, Equatable {
         self.appName = appName
         self.feedbackType = feedbackType
         self.message = message
+        self.text = text
     }
 
     private enum CodingKeys: String, CodingKey {
-        case v, type, theme, accent, palette, attachment, canRecord, appName, feedbackType, message
+        case v, type, theme, accent, palette, attachment, canRecord, appName, feedbackType, message, text
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -107,11 +111,13 @@ public struct InitMessage: Encodable, Equatable {
         try c.encode(appName, forKey: .appName)
         try c.encode(feedbackType, forKey: .feedbackType)
         try c.encode(message, forKey: .message)
+        try c.encodeIfPresent(text, forKey: .text)
     }
 }
 
 public struct StatusMessage: Encodable, Equatable {
-    public enum State: String, Encodable, Equatable { case sending, sent, error }
+    /// `sent` and `queued` are final: the form is done either way.
+    public enum State: String, Encodable, Equatable { case sending, sent, queued, error }
 
     public let v = Bridge.version
     public let type = "status"
@@ -134,6 +140,35 @@ public struct StatusMessage: Encodable, Equatable {
     }
 }
 
+/// Sent right after `sent` when the report's kind has a linked quest: the page shows the
+/// quest in place of the form and posts `close` when it is finished or dismissed.
+/// `metadata` is the same object the feedback carried, so it isn't `Encodable`.
+public struct QuestMessage {
+    public var questId: String
+    public var base: String
+    public var apiKey: String
+    public var pageUrl: String
+    public var visitorId: String
+    public var metadata: [String: Any]
+
+    public init(questId: String, base: String, apiKey: String, pageUrl: String, visitorId: String,
+                metadata: [String: Any]) {
+        self.questId = questId
+        self.base = base
+        self.apiKey = apiKey
+        self.pageUrl = pageUrl
+        self.visitorId = visitorId
+        self.metadata = metadata
+    }
+
+    public var jsonObject: [String: Any] {
+        [
+            "v": Bridge.version, "type": "quest", "questId": questId, "base": base, "apiKey": apiKey,
+            "pageUrl": pageUrl, "visitorId": visitorId, "metadata": metadata,
+        ]
+    }
+}
+
 /// What the page asks the app to do.
 public enum PageMessage: Equatable {
     case ready
@@ -153,6 +188,10 @@ public enum BridgeCodec {
             return "{}"
         }
         return json
+    }
+
+    public static func encode(_ message: QuestMessage) -> String {
+        FeedbackRequests.jsonString(message.jsonObject)
     }
 
     /// The script that delivers a message: JSON is a JavaScript expression, so the object

@@ -7,7 +7,8 @@ import org.json.JSONObject
  * The bridge to the hosted annotate page, version 1. The page side is
  * qaid.dev/src/lib/native-bridge.ts; the two must agree field for field.
  *
- *   app → page   `window.qaidNative.receive(<json>)` via evaluateJavascript: init, status.
+ *   app → page   `window.qaidNative.receive(<json>)` via evaluateJavascript: init, status,
+ *                quest (a linked quest to show after `sent`).
  *   page → app   `window.qaidAndroid.postMessage(<json string>)`, a WebMessageListener the
  *                app registers for the annotate page's origin only:
  *                ready, submit, record, cancel, close, error.
@@ -50,11 +51,27 @@ data class InitMessage(
     val appName: String,
     val feedbackType: FeedbackKind? = null,
     val message: String = "",
+    /** [QaidText.shared]: the page draws these instead of its English. */
+    val text: Map<String, String>? = null,
 )
 
+/** `sent` and `queued` are final: the page offers Done and nothing else. */
 data class StatusMessage(val state: State, val error: String? = null) {
-    enum class State(val wire: String) { SENDING("sending"), SENT("sent"), ERROR("error") }
+    enum class State(val wire: String) { SENDING("sending"), SENT("sent"), QUEUED("queued"), ERROR("error") }
 }
+
+/**
+ * Sent right after `sent` when the report's kind has a linked quest. The page shows the
+ * quest in place of the form, as the same visitor on the same page, with the same metadata.
+ */
+data class QuestMessage(
+    val questId: String,
+    val base: String,
+    val apiKey: String,
+    val pageUrl: String,
+    val visitorId: String,
+    val metadata: JSONObject,
+)
 
 /** What the page asks the app to do. */
 sealed interface PageMessage {
@@ -83,6 +100,18 @@ object Bridge {
         put("appName", message.appName)
         put("feedbackType", message.feedbackType?.wire ?: JSONObject.NULL)
         put("message", message.message)
+        message.text?.let { put("text", JSONObject(it as Map<*, *>)) }
+    }.toString()
+
+    fun encode(message: QuestMessage): String = JSONObject().apply {
+        put("v", VERSION)
+        put("type", "quest")
+        put("questId", message.questId)
+        put("base", message.base)
+        put("apiKey", message.apiKey)
+        put("pageUrl", message.pageUrl)
+        put("visitorId", message.visitorId)
+        put("metadata", message.metadata)
     }.toString()
 
     fun encode(message: StatusMessage): String = JSONObject().apply {

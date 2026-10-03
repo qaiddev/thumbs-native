@@ -6,7 +6,8 @@ import UIKit
 enum ScreenCapture {
     /// Every visible window of the foreground scene, bottom to top, so alerts and
     /// keyboards sit where the person saw them. The SDK's own windows are left out.
-    static func captureScreen() -> UIImage? {
+    /// With `mask`, sensitive views are painted black here, before the image goes anywhere.
+    static func captureScreen(mask: Bool) -> UIImage? {
         guard let window = UIApplication.shared.qaidKeyWindow, let scene = window.windowScene else { return nil }
         let windows = scene.windows
             .filter { !$0.isHidden && $0.alpha > 0.01 && !($0 is QaidOverlayWindow) }
@@ -16,12 +17,24 @@ enum ScreenCapture {
         // 2x is plenty to read a screen and keeps the upload small.
         format.scale = min(scene.screen.scale, 2)
         format.opaque = true
+        let masks = mask
+            ? MaskGeometry.imageRects(SensitiveViews.frames(in: scene, secureFields: nil), bounds: bounds, scale: format.scale)
+            : []
         return UIGraphicsImageRenderer(bounds: bounds, format: format).image { context in
             (window.backgroundColor ?? .black).setFill()
             context.fill(bounds)
             for w in windows {
                 w.drawHierarchy(in: w.frame, afterScreenUpdates: false)
             }
+            guard !masks.isEmpty else { return }
+            // The rects are in image pixels; undo the renderer's point scale to paint them.
+            let cg = context.cgContext
+            cg.saveGState()
+            cg.translateBy(x: bounds.minX, y: bounds.minY)
+            cg.scaleBy(x: 1 / format.scale, y: 1 / format.scale)
+            cg.setFillColor(UIColor.black.cgColor)
+            cg.fill(masks)
+            cg.restoreGState()
         }
     }
 

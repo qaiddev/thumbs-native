@@ -12,7 +12,8 @@ struct RecordedVideo {
 
 /// In-app screen recording with ReplayKit. iOS asks the person first (once per launch);
 /// only this app's screens are recorded, never other apps or the home screen. A small
-/// neon pill floats above the app with the running time and Stop.
+/// neon pill floats above the app with the running time and Stop, and black boxes cover
+/// sensitive views for as long as the recording runs.
 @MainActor
 final class ScreenRecorder {
     static let shared = ScreenRecorder()
@@ -22,27 +23,37 @@ final class ScreenRecorder {
     private var maxSeconds: TimeInterval = 180
     private var maxBytes = 48 * 1024 * 1024
     private var control: StopControlWindow?
+    private var masks: MaskOverlay?
     private var timer: Timer?
+    private var text = QaidText()
     private var completion: ((Result<RecordedVideo, QaidError>) -> Void)?
 
-    func start(maxSeconds: TimeInterval, maxBytes: Int,
+    func start(maxSeconds: TimeInterval, maxBytes: Int, text: QaidText, maskSensitiveViews: Bool,
                completion: @escaping (Result<RecordedVideo, QaidError>) -> Void) {
         let recorder = RPScreenRecorder.shared()
         guard !isRecording else { return }
         guard recorder.isAvailable else {
-            completion(.failure(.recording("Screen recording isn't available right now.")))
+            completion(.failure(.recording(text.recordingUnavailable)))
             return
         }
         self.maxSeconds = maxSeconds
         self.maxBytes = maxBytes
+        self.text = text
         self.completion = completion
+        // Up before the first frame is captured, so no frame shows a sensitive view.
+        if maskSensitiveViews, let scene = UIApplication.shared.qaidKeyWindow?.windowScene {
+            let overlay = MaskOverlay(scene: scene)
+            overlay.start()
+            masks = overlay
+        }
         recorder.isMicrophoneEnabled = false
         recorder.startRecording { [weak self] error in
             DispatchQueue.main.async {
                 guard let self else { return }
                 if let error {
                     let declined = (error as NSError).code == RPRecordingErrorCode.userDeclined.rawValue
-                    self.finish(.failure(.recording(declined ? "Recording wasn't started." : error.localizedDescription)))
+                    self.removeMasks()
+                    self.finish(.failure(.recording(declined ? self.text.recordingNotStarted : self.text.recordingFailed)))
                     return
                 }
                 self.isRecording = true
@@ -64,11 +75,13 @@ final class ScreenRecorder {
         RPScreenRecorder.shared().stopRecording(withOutput: raw) { [weak self] error in
             DispatchQueue.main.async {
                 guard let self else { return }
-                if let error {
-                    self.finish(.failure(.recording(error.localizedDescription)))
+                // Only once ReplayKit has stopped, or the last frames could show the field.
+                self.removeMasks()
+                if error != nil {
+                    self.finish(.failure(.recording(self.text.recordingFailed)))
                     return
                 }
-                VideoExport.prepare(raw, maxBytes: self.maxBytes) { result in
+                VideoExport.prepare(raw, maxBytes: self.maxBytes, failure: self.text.recordingFailed) { result in
                     try? FileManager.default.removeItem(at: raw)
                     DispatchQueue.main.async {
                         self.finish(result.map { url in
@@ -81,6 +94,11 @@ final class ScreenRecorder {
         }
     }
 
+    private func removeMasks() {
+        masks?.stop()
+        masks = nil
+    }
+
     private func finish(_ result: Result<RecordedVideo, QaidError>) {
         let done = completion
         completion = nil
@@ -89,7 +107,7 @@ final class ScreenRecorder {
 
     private func showControl() {
         guard let scene = UIApplication.shared.qaidKeyWindow?.windowScene else { return }
-        let window = StopControlWindow(windowScene: scene) { [weak self] in self?.stop() }
+        let window = StopControlWindow(windowScene: scene, text: text) { [weak self] in self?.stop() }
         window.isHidden = false
         control = window
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
@@ -106,7 +124,8 @@ final class ScreenRecorder {
 /// Makes ReplayKit's file an H.264 MP4 (what browsers play in the qaid inbox) and keeps
 /// it under the upload limit: smaller frames the further over it is, then a hard cut.
 enum VideoExport {
-    static func prepare(_ source: URL, maxBytes: Int, completion: @escaping (Result<URL, QaidError>) -> Void) {
+    static func prepare(_ source: URL, maxBytes: Int, failure: String,
+                        completion: @escaping (Result<URL, QaidError>) -> Void) {
         let size = (try? source.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
         let preset: String
         switch VideoPolicy.targetHeight(sizeBytes: size, limit: maxBytes) {
@@ -117,7 +136,7 @@ enum VideoExport {
         }
         let asset = AVURLAsset(url: source)
         guard let export = AVAssetExportSession(asset: asset, presetName: preset) else {
-            completion(.failure(.recording("Couldn't prepare the recording.")))
+            completion(.failure(.recording(failure)))
             return
         }
         let out = FileManager.default.temporaryDirectory.appendingPathComponent("qaid-recording-\(UUID().uuidString).mp4")
@@ -129,7 +148,7 @@ enum VideoExport {
             if export.status == .completed {
                 completion(.success(out))
             } else {
-                completion(.failure(.recording(export.error?.localizedDescription ?? "Couldn't prepare the recording.")))
+                completion(.failure(.recording(failure)))
             }
         }
     }
@@ -140,9 +159,11 @@ enum VideoExport {
 final class StopControlWindow: QaidOverlayWindow {
     private let pill = UIButton(type: .system)
     private let onStop: () -> Void
+    private let stopTitle: String
 
-    init(windowScene: UIWindowScene, onStop: @escaping () -> Void) {
+    init(windowScene: UIWindowScene, text: QaidText, onStop: @escaping () -> Void) {
         self.onStop = onStop
+        self.stopTitle = text.recordingStop
         super.init(windowScene: windowScene)
         windowLevel = .alert + 1
         backgroundColor = .clear
@@ -164,7 +185,7 @@ final class StopControlWindow: QaidOverlayWindow {
         pill.layer.shadowRadius = 8
         pill.layer.shadowOpacity = 0.8
         pill.layer.shadowOffset = .zero
-        pill.accessibilityLabel = "Stop screen recording"
+        pill.accessibilityLabel = text.recordingStopLabel
         pill.addTarget(self, action: #selector(stopTapped), for: .touchUpInside)
         pill.translatesAutoresizingMaskIntoConstraints = false
         root.view.addSubview(pill)
@@ -180,7 +201,7 @@ final class StopControlWindow: QaidOverlayWindow {
 
     func setElapsed(_ seconds: TimeInterval) {
         let whole = Int(seconds)
-        var title = AttributedString(String(format: "●  %d:%02d   Stop", whole / 60, whole % 60))
+        var title = AttributedString(String(format: "●  %d:%02d   %@", whole / 60, whole % 60, stopTitle))
         title.font = .monospacedDigitSystemFont(ofSize: 15, weight: .semibold)
         UIView.performWithoutAnimation {
             pill.configuration?.attributedTitle = title

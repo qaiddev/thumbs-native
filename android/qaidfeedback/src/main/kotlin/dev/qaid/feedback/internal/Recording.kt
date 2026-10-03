@@ -23,6 +23,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import dev.qaid.feedback.core.QaidConfig
 import dev.qaid.feedback.core.QaidError
+import dev.qaid.feedback.core.QaidText
 import dev.qaid.feedback.core.VideoPolicy
 import java.io.File
 import java.lang.ref.WeakReference
@@ -43,8 +44,10 @@ internal object Recording {
     private val main = Handler(Looper.getMainLooper())
     private var callback: ((Result<RecordedVideo>) -> Unit)? = null
     private var overlay: StopOverlay? = null
+    private var masks: MaskOverlays? = null
     private var startedAt = 0L
     private var appContext: Context? = null
+    private var emptyMessage = QaidText().recordingEmpty
 
     /** Consent comes back through the activity result registry, which needs a ComponentActivity. */
     fun canRecord(activity: Activity) = activity is ComponentActivity
@@ -52,7 +55,7 @@ internal object Recording {
     fun start(activity: ComponentActivity, config: QaidConfig, onResult: (Result<RecordedVideo>) -> Unit) {
         if (isRecording) return
         val manager = activity.getSystemService(MediaProjectionManager::class.java)
-            ?: return onResult(Result.failure(QaidError.Recording("Screen recording isn't available on this device.")))
+            ?: return onResult(Result.failure(QaidError.Recording(config.text.recordingUnavailable)))
         callback = onResult
         appContext = activity.applicationContext
         var launcher: ActivityResultLauncher<Intent>? = null
@@ -63,7 +66,7 @@ internal object Recording {
             launcher?.unregister()
             val data = result.data
             if (result.resultCode != Activity.RESULT_OK || data == null) {
-                finish(Result.failure(QaidError.Recording("Recording wasn't started.")))
+                finish(Result.failure(QaidError.Recording(config.text.recordingNotStarted)))
                 return@register
             }
             val decor = activity.window.decorView
@@ -78,15 +81,27 @@ internal object Recording {
                 .putExtra(QaidRecordService.EXTRA_BITRATE, VideoPolicy.bitrateFor(config.maxVideoBytes, config.maxRecordingSeconds))
                 .putExtra(QaidRecordService.EXTRA_MAX_BYTES, config.maxVideoBytes)
                 .putExtra(QaidRecordService.EXTRA_MAX_SECONDS, config.maxRecordingSeconds)
+                .putExtra(QaidRecordService.EXTRA_CHANNEL_NAME, config.text.recordingChannel)
+                .putExtra(QaidRecordService.EXTRA_TITLE, config.text.recordingNotificationTitle)
+                .putExtra(QaidRecordService.EXTRA_TEXT, config.text.recordingNotificationText)
+                .putExtra(QaidRecordService.EXTRA_STOP, config.text.stop)
+                .putExtra(QaidRecordService.EXTRA_ERROR_NOT_STARTED, config.text.recordingNotStarted)
+                .putExtra(QaidRecordService.EXTRA_ERROR_FAILED, config.text.recordingFailed)
+                .putExtra(QaidRecordService.EXTRA_ERROR_EMPTY, config.text.recordingEmpty)
+            // Boxes up before the first recorded frame: the service starts after this returns.
+            if (config.maskSensitiveViews) masks = MaskOverlays(activity.application).also { it.start(activity) }
             try {
                 ContextCompat.startForegroundService(activity, intent)
             } catch (e: Exception) {
-                finish(Result.failure(QaidError.Recording("Recording couldn't start.")))
+                masks?.stop()
+                masks = null
+                finish(Result.failure(QaidError.Recording(config.text.recordingFailed)))
                 return@register
             }
             isRecording = true
             startedAt = SystemClock.elapsedRealtime()
-            overlay = StopOverlay(activity) { stop() }.also { it.show() }
+            emptyMessage = config.text.recordingEmpty
+            overlay = StopOverlay(activity, config.text.stop, config.text.stopRecording) { stop() }.also { it.show() }
         }
         launcher.launch(manager.createScreenCaptureIntent())
     }
@@ -105,11 +120,13 @@ internal object Recording {
             isRecording = false
             overlay?.remove()
             overlay = null
+            masks?.stop()
+            masks = null
             val result = if (file != null && file.length() > 0) {
                 Result.success(RecordedVideo(file, duration, file.length()))
             } else {
                 file?.delete()
-                Result.failure(QaidError.Recording(error ?: "The recording was empty."))
+                Result.failure(QaidError.Recording(error ?: emptyMessage))
             }
             finish(result)
         }
@@ -123,7 +140,12 @@ internal object Recording {
 }
 
 /** The "● 0:12  Stop" pill, laid over the activity's own window. */
-private class StopOverlay(activity: Activity, private val onStop: () -> Unit) {
+private class StopOverlay(
+    activity: Activity,
+    private val stopLabel: String,
+    private val stopDescription: String,
+    private val onStop: () -> Unit,
+) {
     private val activityRef = WeakReference(activity)
     private val handler = Handler(Looper.getMainLooper())
     private var pill: TextView? = null
@@ -132,7 +154,7 @@ private class StopOverlay(activity: Activity, private val onStop: () -> Unit) {
     private val tick = object : Runnable {
         override fun run() {
             val whole = Recording.elapsedSeconds().toInt()
-            pill?.text = String.format(java.util.Locale.US, "●  %d:%02d   Stop", whole / 60, whole % 60)
+            pill?.text = String.format(java.util.Locale.US, "●  %d:%02d   %s", whole / 60, whole % 60, stopLabel)
             handler.postDelayed(this, 500)
         }
     }
@@ -152,7 +174,7 @@ private class StopOverlay(activity: Activity, private val onStop: () -> Unit) {
                 setStroke((1 * density).toInt().coerceAtLeast(1), red)
             }
             elevation = 12 * density
-            contentDescription = "Stop screen recording"
+            contentDescription = stopDescription
             setOnClickListener { onStop() }
         }
         val top = ViewCompat.getRootWindowInsets(root)?.getInsets(WindowInsetsCompat.Type.systemBars())?.top ?: 0
