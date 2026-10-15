@@ -239,25 +239,26 @@ struct ThumbsSheetView: View {
     }
 
     private func tools(_ model: ThumbsSheetModel, _ look: ThumbsLook) -> some View {
-        // Three buttons don't fit one row on a phone at large text sizes
-        let count = [model.showsMarkup, model.showsRecord, model.showsBrowse].filter { $0 }.count
-        return AdaptiveRow(vertical: typeSize.isAccessibilitySize || (count > 2 && typeSize > .large)) {
-            if model.showsMarkup {
-                Button { session.openMarkup() } label: {
-                    if session.preparingMarkup {
-                        ProgressView().tint(look.positive)
-                    } else {
-                        Label(text.markup, systemImage: "pencil.tip")
+        VStack(spacing: 10) {
+            AdaptiveRow(vertical: typeSize.isAccessibilitySize) {
+                if model.showsMarkup {
+                    Button { session.openMarkup() } label: {
+                        if session.preparingMarkup {
+                            ProgressView().tint(look.positive)
+                        } else {
+                            Label(text.markup, systemImage: "pencil.tip")
+                        }
                     }
+                    .buttonStyle(NeonButtonStyle(color: look.positive, on: false, look: look))
+                    .accessibilityLabel(text.markup)
+                    .disabled(session.preparingMarkup)
                 }
-                .buttonStyle(NeonButtonStyle(color: look.positive, on: false, look: look))
-                .accessibilityLabel(text.markup)
-                .disabled(session.preparingMarkup)
+                if model.showsRecord {
+                    Button { session.record() } label: { Label(text.record, systemImage: "record.circle") }
+                        .buttonStyle(NeonButtonStyle(color: look.negative, on: false, look: look))
+                }
             }
-            if model.showsRecord {
-                Button { session.record() } label: { Label(text.record, systemImage: "record.circle") }
-                    .buttonStyle(NeonButtonStyle(color: look.negative, on: false, look: look))
-            }
+            // A row of its own: three buttons side by side broke their words on a phone.
             if model.showsBrowse {
                 Button { session.browse() } label: { Label(text.browse, systemImage: "hand.draw") }
                     .buttonStyle(NeonButtonStyle(color: look.ink, on: false, look: look))

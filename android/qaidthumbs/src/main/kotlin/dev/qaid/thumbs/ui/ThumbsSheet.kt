@@ -338,16 +338,17 @@ private fun SheetForm(state: ThumbsSheetState, image: ImageBitmap?, colors: Thum
                                 },
                         )
                     }
-                    if (model.showsBrowse) {
-                        NeonPill(
-                            model.text.browse, colors.ink, colors, icon = ThumbsIcons.move, enabled = enabled,
-                            modifier = Modifier.weight(1f).testTag(ThumbsTags.BROWSE)
-                                .semantics { stateDescription = model.text.browseHint }
-                                .clickable(enabled = enabled, role = Role.Button) {
-                                    if (state.model.toolsEnabled) actions.onBrowse(state.model)
-                                },
-                        )
-                    }
+                }
+                // A row of its own, as on iOS: three pills side by side broke their words on a phone.
+                if (model.showsBrowse) {
+                    NeonPill(
+                        model.text.browse, colors.ink, colors, icon = ThumbsIcons.move, enabled = enabled,
+                        modifier = Modifier.fillMaxWidth().testTag(ThumbsTags.BROWSE)
+                            .semantics { stateDescription = model.text.browseHint }
+                            .clickable(enabled = enabled, role = Role.Button) {
+                                if (state.model.toolsEnabled) actions.onBrowse(state.model)
+                            },
+                    )
                 }
             }
             if (model.showsKind) Thumbs(state, colors)
