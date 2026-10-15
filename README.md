@@ -42,7 +42,58 @@ QaidThumbs.present(activity, screen = "Settings")
 ```
 
 A SwiftUI app that presents its own sheets can use `QaidThumbsSheet` with
-`QaidThumbs.captureScreenshot()`; it has no Record button, since recording needs the sheet off screen.
+`QaidThumbs.captureScreenshot()`; it has no Record or Move around button, since both need the sheet off screen.
+
+## Settings
+
+All of them are set once, in `configure`. Only `apiKey` and `appName` are required.
+
+| Setting | Default | What it does |
+|---|---|---|
+| `apiKey`, `appName` | — | The project's embed key; the name in "to the … team". |
+| `endpoint`, `pageUrl` | qaid.dev; `app://<bundle id>` | Where reports go, and the URL they are filed under. |
+| `style` | qaid's neon look | Colours, corners and light/dark (below). |
+| `accent` | neon green/pink | Just the thumbs colours. `style` overrides it. |
+| `palette` | six bright markers | Marker colours in the markup editor. |
+| `allowRecording`, `maxRecordingSeconds`, `maxVideoBytes` | on, 180 s, 48 MB | Record screen. |
+| `allowBrowsing` | on | Move around (below). |
+| `text` | English | Every word on screen. |
+| `quests`, `questsBase` | none | A quest to offer after a report. |
+| `captureLogs`, `maskSensitiveViews` | on, on | The app's log lines; black out secure fields. |
+
+Per report: `present(screen:dark:)`. Any time: `setUser`, `setMetadata`, `setScreen`, `log`,
+`markSensitive`, `enableShakeToReport`.
+
+## Match your app
+
+`style` puts the sheet in the app's own colours. Give a palette per appearance; anything left nil keeps
+qaid's own.
+
+```swift
+QaidThumbsConfiguration(
+    apiKey: "…", appName: "My App",
+    style: QaidStyle(
+        light: QaidPalette(background: "#F0F0F0", surface: "#FFFFFF", ink: "#1F2937", muted: "#6B7280",
+                           line: "#222222", primary: "#EA580C", cornerRadius: 0, borderWidth: 2, glow: false),
+        dark: QaidPalette(background: "#08090C", surface: "#FFFFFF0F", ink: "#FFFFFF", muted: "#FFFFFF8C",
+                          line: "#FFFFFF26", primary: "#FB702C", cornerRadius: 16, glow: false)))
+```
+
+1. `primary` makes Send a solid button (`onPrimary` is its text, white by default).
+2. `cornerRadius` is for cards and buttons: 0 is square, nil keeps qaid's capsules.
+3. `glow: false` drops the neon glow.
+
+**Light or dark.** If the app has its own light/dark setting, pass it on each call:
+`QaidThumbs.present(screen: "Home", dark: true)`. Pass `nil` to follow the device. On iOS this matters
+because a UIKit sheet doesn't pick up SwiftUI's `.preferredColorScheme`. `style.appearance` sets a fixed
+default instead.
+
+## Move around
+
+**Move around** shrinks the sheet to a small pill. The person can then scroll and move through the app to
+the screen with the problem. **Use this screen** retakes the screenshot there and brings the sheet back.
+**Back** brings it back unchanged. Either way the thumbs and words are kept. The pill can be dragged up or
+down, and it is never in the screenshot. `allowBrowsing: false` hides the button.
 
 ## What the person sees
 
@@ -50,7 +101,8 @@ The SDK screenshots the app first, so the sheet is never in it. The sheet shows 
 message box and Send. **Mark up** opens a native editor with box, arrow, pen and redact tools, undo and
 clear. Redact paints an opaque black box onto the image's own pixels before anything leaves the phone.
 **Record screen** closes the sheet, records the app (ReplayKit / MediaProjection), and brings the sheet
-back with the clip. Recordings need a Pro plan.
+back with the clip. Recordings need a Pro plan. **Move around** (below) lets the person go to another
+screen and retake the screenshot there.
 
 ## What a report carries
 

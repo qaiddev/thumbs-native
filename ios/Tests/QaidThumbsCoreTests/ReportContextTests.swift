@@ -20,7 +20,7 @@ final class MetadataTests: XCTestCase {
         XCTAssertNil(meta["user"])
         XCTAssertNil(meta["custom"])
         XCTAssertNil(meta["screen"])
-        XCTAssertEqual(meta["sdk"] as? String, "qaid-ios/0.3.0")
+        XCTAssertEqual(meta["sdk"] as? String, "qaid-ios/0.4.0")
         XCTAssertNil(QaidUser().jsonObject)
         XCTAssertNil(QaidUser(id: "", email: nil, name: "").jsonObject)
     }
@@ -222,6 +222,6 @@ final class PageUrlTests: XCTestCase {
     }
 
     func testVersion() {
-        XCTAssertEqual(QaidThumbsSDK.version, "0.3.0")
+        XCTAssertEqual(QaidThumbsSDK.version, "0.4.0")
     }
 }

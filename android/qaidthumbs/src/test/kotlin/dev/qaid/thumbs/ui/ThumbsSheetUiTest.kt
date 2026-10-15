@@ -76,12 +76,16 @@ internal fun pngDataUrl(width: Int = 360, height: Int = 640, color: Int = Color.
 internal class RecordingActions : ThumbsSheetActions {
     val sent = mutableListOf<ThumbsSubmission>()
     val recorded = mutableListOf<ThumbsSheetModel>()
+    val browsed = mutableListOf<ThumbsSheetModel>()
     var closed = 0
     override fun onSend(submission: ThumbsSubmission) {
         sent += submission
     }
     override fun onRecord(draft: ThumbsSheetModel) {
         recorded += draft
+    }
+    override fun onBrowse(draft: ThumbsSheetModel) {
+        browsed += draft
     }
     override fun onClose() {
         closed++

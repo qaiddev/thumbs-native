@@ -34,6 +34,8 @@ final class ThumbsSession: ObservableObject {
     var dismiss: (_ then: @escaping () -> Void) -> Void = { $0() }
     /// Leaves the sheet to record the screen. nil hides Record.
     var onRecord: (() -> Void)?
+    /// Leaves the sheet so the person can move around the app. nil hides Move around.
+    var onBrowse: (() -> Void)?
     /// Called once, after the sheet closed for good.
     var onFinish: (() -> Void)?
 
@@ -114,6 +116,17 @@ final class ThumbsSession: ObservableObject {
     func record() {
         guard model.showsRecord, model.toolsEnabled else { return }
         onRecord?()
+    }
+
+    func browse() {
+        guard model.showsBrowse, model.toolsEnabled else { return }
+        onBrowse?()
+    }
+
+    /// The screenshot taken where the person moved to; nil if the capture failed.
+    func retakeScreenshot(_ dataUrl: String?) {
+        model.retakeScreenshot(dataUrl)
+        refreshPreview()
     }
 
     func attach(_ recorded: RecordedVideo) {

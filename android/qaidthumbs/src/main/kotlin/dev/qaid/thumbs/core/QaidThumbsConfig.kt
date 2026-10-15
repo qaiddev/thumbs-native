@@ -22,10 +22,17 @@ data class QaidThumbsConfig(
     val endpoint: String = "https://qaid.dev/api/feedback",
     /** Thumbs colours for the sheet; null uses qaid's neon pair for the current theme. */
     val accent: NeonAccent? = null,
+    /** The sheet's colours, corners and light/dark, to match the app. Default: qaid's neon look. */
+    val style: QaidStyle = QaidStyle(),
     /** Marker colours offered in the markup editor, as `#rrggbb`. Redact is always black. */
     val palette: List<String> = DEFAULT_PALETTE,
     /** Offer "Record screen" on the sheet. */
     val allowRecording: Boolean = true,
+    /**
+     * Offer "Move around": the sheet shrinks to a pill so the person can scroll and move
+     * through the app, then retake the screenshot where the problem is.
+     */
+    val allowBrowsing: Boolean = true,
     /** The server refuses anything over 50 MB; stay under it with room for the form. */
     val maxVideoBytes: Long = 48L * 1024 * 1024,
     /** A recording stops itself after this long. */

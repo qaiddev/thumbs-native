@@ -25,7 +25,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -150,8 +149,8 @@ internal fun MarkupEditor(
         FlowRow(
             Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(18.dp))
-                .border(BorderStroke(1.dp, colors.line), RoundedCornerShape(18.dp))
+                .clip(colors.card(18.dp))
+                .border(BorderStroke(colors.border, colors.line), colors.card(18.dp))
                 .background(colors.surface)
                 .padding(horizontal = 8.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),

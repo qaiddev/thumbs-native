@@ -48,8 +48,10 @@ data class QaidThumbsConfig(
     val appName: String,
     val endpoint: String = "https://qaid.dev/api/feedback",
     val accent: NeonAccent? = null,
+    val style: QaidStyle = QaidStyle(),          // the app's colours, corners and light/dark (0.4.0)
     val palette: List<String> = DEFAULT_PALETTE, // "#rgb" / "#rrggbb" / "#rrggbbaa", as iOS; redact is always black
     val allowRecording: Boolean = true,
+    val allowBrowsing: Boolean = true,           // "Move around": the sheet shrinks to a pill (0.4.0)
     val maxVideoBytes: Long = 48L * 1024 * 1024,
     val maxRecordingSeconds: Int = 180,
     val text: QaidText = QaidText(),
@@ -86,6 +88,26 @@ data class NeonAccent(val positive: String, val negative: String) {
     companion object { val DARK: NeonAccent; val LIGHT: NeonAccent; fun forTheme(dark: Boolean): NeonAccent }
 }
 
+// 0.4.0, the same names as iOS. Null fields keep qaid's own look; colours as `palette`.
+enum class QaidAppearance { SYSTEM, LIGHT, DARK }
+data class QaidPalette(
+    val background: String? = null, val surface: String? = null, val ink: String? = null,
+    val muted: String? = null, val line: String? = null,
+    val primary: String? = null, val onPrimary: String? = null,   // Send solid in primary when set
+    val positive: String? = null, val negative: String? = null,   // override accent
+    val cornerRadius: Float? = null,                              // dp; null = rounded cards, capsule buttons
+    val borderWidth: Float? = null,                               // dp; default 1
+    val glow: Boolean? = null,                                    // parity with iOS; the Compose sheet draws no glow
+)
+data class QaidStyle(
+    val appearance: QaidAppearance = QaidAppearance.SYSTEM,
+    val light: QaidPalette = QaidPalette(),
+    val dark: QaidPalette = QaidPalette(),
+) {
+    fun palette(dark: Boolean): QaidPalette
+    fun forcedDark(dark: Boolean?): Boolean?     // present(dark=) beats appearance; null → the activity's night mode
+}
+
 enum class QaidLogLevel(val wire: String) { LOG, WARN, ERROR }
 
 sealed class QaidError : Exception {
@@ -114,7 +136,9 @@ markupPen markupRedact markupUndo markupClear markupColor` ("Colour {n}").
 `attachScreenshot` and `recordInstead` are no longer drawn. Also new in 0.3.0, appended
 after `errorOffline`, same names and English as iOS: `markupFailed` ("Couldn't add the marks.
 Try Use again."), `discardTitle` ("Discard this feedback?"), `discardConfirm` ("Discard"),
-`discardCancel` ("Keep editing").
+`discardCancel` ("Keep editing"). New in 0.4.0, appended last, as iOS: `browse` ("Move
+around"), `browseCapture` ("Use this screen"), `browseBack` ("Back"), `browseHint` ("Go to
+the screen with the problem, then tap Use this screen.").
 
 Everything else is `internal`: the sheet (`ui/ThumbsSheet`, `ui/MarkupEditor`), the session,
 and the core plumbing that 0.2 had public (`FeedbackRequests`, `DeviceInfo`, `QaidResult`,

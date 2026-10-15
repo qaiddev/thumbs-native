@@ -18,11 +18,16 @@ public struct QaidThumbsConfiguration: Equatable {
     public var appName: String
     /// Thumbs colours for the sheet; nil uses qaid's neon pair for the current theme.
     public var accent: NeonAccent?
+    /// The sheet's colours, corners and light/dark, to match the app. Default: qaid's neon look.
+    public var style: QaidStyle
     /// Marker colours offered in the markup editor, as `#rgb`, `#rrggbb` or `#rrggbbaa`.
     /// Entries that don't parse are skipped; redact is always black.
     public var palette: [String]
     /// Offer "Record screen" on the sheet.
     public var allowRecording: Bool
+    /// Offer "Move around": the sheet shrinks to a pill so the person can scroll and move
+    /// through the app, then retake the screenshot where the problem is. `present()` only.
+    public var allowBrowsing: Bool
     /// The server refuses anything over 50 MB; stay under it with room for the form.
     public var maxVideoBytes: Int
     /// A recording stops itself after this long.
@@ -46,8 +51,10 @@ public struct QaidThumbsConfiguration: Equatable {
         pageUrl: URL? = nil,
         appName: String,
         accent: NeonAccent? = nil,
+        style: QaidStyle = QaidStyle(),
         palette: [String] = QaidThumbsConfiguration.defaultPalette,
         allowRecording: Bool = true,
+        allowBrowsing: Bool = true,
         maxVideoBytes: Int = 48 * 1024 * 1024,
         maxRecordingSeconds: TimeInterval = 180,
         text: QaidText = QaidText(),
@@ -61,8 +68,10 @@ public struct QaidThumbsConfiguration: Equatable {
         self.pageUrl = pageUrl
         self.appName = appName
         self.accent = accent
+        self.style = style
         self.palette = palette
         self.allowRecording = allowRecording
+        self.allowBrowsing = allowBrowsing
         self.maxVideoBytes = maxVideoBytes
         self.maxRecordingSeconds = maxRecordingSeconds
         self.text = text

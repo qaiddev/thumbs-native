@@ -64,6 +64,16 @@ public struct QaidText: Equatable, Sendable {
     public var discardConfirm: String
     public var discardCancel: String
 
+    // New in 0.4.0: leaving the sheet to move around the app.
+    /// The sheet's button that shrinks it to a pill.
+    public var browse: String
+    /// On the pill: retake the screenshot of the screen now showing, then reopen.
+    public var browseCapture: String
+    /// On the pill: reopen with the screenshot as it was.
+    public var browseBack: String
+    /// Read by VoiceOver when the sheet shrinks to the pill.
+    public var browseHint: String
+
     public init(
         title: String = "Send feedback",
         subtitle: String = "to the {app} team",
@@ -114,7 +124,11 @@ public struct QaidText: Equatable, Sendable {
         markupFailed: String = "Couldn't add the marks. Try Use again.",
         discardTitle: String = "Discard this feedback?",
         discardConfirm: String = "Discard",
-        discardCancel: String = "Keep editing"
+        discardCancel: String = "Keep editing",
+        browse: String = "Move around",
+        browseCapture: String = "Use this screen",
+        browseBack: String = "Back",
+        browseHint: String = "Go to the screen with the problem, then tap Use this screen."
     ) {
         self.title = title
         self.subtitle = subtitle
@@ -166,6 +180,10 @@ public struct QaidText: Equatable, Sendable {
         self.discardTitle = discardTitle
         self.discardConfirm = discardConfirm
         self.discardCancel = discardCancel
+        self.browse = browse
+        self.browseCapture = browseCapture
+        self.browseBack = browseBack
+        self.browseHint = browseHint
     }
 
     /// `subtitle` with `{app}` filled in.

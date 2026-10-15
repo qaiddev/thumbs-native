@@ -59,7 +59,7 @@ public struct DeviceInfo: Equatable {
 }
 
 public enum QaidThumbsSDK {
-    public static let version = "0.3.0"
+    public static let version = "0.4.0"
 }
 
 /// A screenshot (or plain message) report, as the sheet hands it over on Send.

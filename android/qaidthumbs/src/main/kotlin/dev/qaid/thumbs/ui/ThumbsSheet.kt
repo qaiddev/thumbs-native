@@ -29,7 +29,6 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -66,6 +65,7 @@ import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -90,6 +90,9 @@ internal interface ThumbsSheetActions {
 
     /** Leave to record the screen; [draft] is the sheet as it stands, to come back to. */
     fun onRecord(draft: ThumbsSheetModel)
+
+    /** Leave to move around the app with the sheet shrunk to a pill; [draft] is the sheet to come back to. */
+    fun onBrowse(draft: ThumbsSheetModel)
 
     /** Cancel, Done, Close or back: the session ends. */
     fun onClose()
@@ -182,6 +185,9 @@ internal object ThumbsTags {
     const val REMOVE = "qaid-thumbs-remove"
     const val MARKUP = "qaid-thumbs-markup"
     const val RECORD = "qaid-thumbs-record"
+    const val BROWSE = "qaid-thumbs-browse"
+    const val BROWSE_CAPTURE = "qaid-thumbs-browse-capture"
+    const val BROWSE_BACK = "qaid-thumbs-browse-back"
     const val KIND = "qaid-thumbs-kind"
     const val UP = "qaid-thumbs-up"
     const val DOWN = "qaid-thumbs-down"
@@ -217,7 +223,7 @@ internal class ThumbsSheetDialog(
     if (dark) android.R.style.Theme_Material_NoActionBar else android.R.style.Theme_Material_Light_NoActionBar,
 ) {
     init {
-        val colors = ThumbsColors.of(dark, state.model.accent(dark))
+        val colors = ThumbsColors.of(dark, state.model.accent(dark), state.model.style.palette(dark))
         val view = ComposeView(context).apply { setContent { ThumbsSheet(state, dark, actions) } }
         setContentView(view, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         setCanceledOnTouchOutside(false)
@@ -247,7 +253,7 @@ internal fun ThumbsSheet(
     render: MarkupRender = MarkupRenderer::render,
 ) {
     val model = state.model
-    val colors = ThumbsColors.of(dark, model.accent(dark))
+    val colors = ThumbsColors.of(dark, model.accent(dark), model.style.palette(dark))
     val dataUrl = model.image
     // Decoded off the main thread; the capture's own pixels, which the editor draws on.
     val bitmap by produceState<ImageBitmap?>(null, dataUrl) {
@@ -332,6 +338,16 @@ private fun SheetForm(state: ThumbsSheetState, image: ImageBitmap?, colors: Thum
                                 },
                         )
                     }
+                    if (model.showsBrowse) {
+                        NeonPill(
+                            model.text.browse, colors.ink, colors, icon = ThumbsIcons.move, enabled = enabled,
+                            modifier = Modifier.weight(1f).testTag(ThumbsTags.BROWSE)
+                                .semantics { stateDescription = model.text.browseHint }
+                                .clickable(enabled = enabled, role = Role.Button) {
+                                    if (state.model.toolsEnabled) actions.onBrowse(state.model)
+                                },
+                        )
+                    }
                 }
             }
             if (model.showsKind) Thumbs(state, colors)
@@ -352,6 +368,7 @@ private fun SheetForm(state: ThumbsSheetState, image: ImageBitmap?, colors: Thum
         }
         NeonPill(
             model.sendLabel, colors.positive, colors, lit = true, enabled = model.sendEnabled, minHeight = 52.dp, fontSize = 17,
+            primary = true,
             modifier = Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 8.dp).testTag(ThumbsTags.SEND)
                 .clickable(enabled = model.sendEnabled, role = Role.Button) {
                     when (val action = state.model.primary()) {
@@ -393,8 +410,8 @@ private fun Preview(state: ThumbsSheetState, image: ImageBitmap?, colors: Thumbs
         Modifier
             .fillMaxWidth()
             .heightIn(min = 120.dp, max = maxHeight)
-            .clip(RoundedCornerShape(16.dp))
-            .border(BorderStroke(1.dp, colors.line), RoundedCornerShape(16.dp))
+            .clip(colors.card(16.dp))
+            .border(BorderStroke(colors.border, colors.line), colors.card(16.dp))
             .background(colors.surface)
             .padding(10.dp),
         contentAlignment = Alignment.Center,
@@ -404,7 +421,7 @@ private fun Preview(state: ThumbsSheetState, image: ImageBitmap?, colors: Thumbs
                 if (image != null) {
                     Image(
                         image, contentDescription = model.text.markupTitle, contentScale = ContentScale.Fit,
-                        modifier = Modifier.clip(RoundedCornerShape(10.dp)).testTag(ThumbsTags.IMAGE)
+                        modifier = Modifier.clip(colors.card(10.dp)).testTag(ThumbsTags.IMAGE)
                             .clickable(
                                 enabled = model.showsMarkup && model.toolsEnabled,
                                 onClickLabel = model.text.markup,
@@ -507,7 +524,7 @@ private fun Message(state: ThumbsSheetState, colors: ThumbsColors) {
             enabled = model.inputsEnabled,
             placeholder = { Text(model.text.placeholder, color = colors.muted) },
             minLines = 5,
-            shape = RoundedCornerShape(14.dp),
+            shape = colors.card(14.dp),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedTextColor = colors.ink,
                 unfocusedTextColor = colors.ink,

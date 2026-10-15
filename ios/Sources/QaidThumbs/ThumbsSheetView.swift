@@ -101,7 +101,9 @@ struct ThumbsSheetView: View {
 
     var body: some View {
         let model = session.model
-        let look = ThumbsLook(accent: model.accent(scheme == .dark ? .dark : .light), dark: scheme == .dark)
+        let theme: QaidTheme = scheme == .dark ? .dark : .light
+        let look = ThumbsLook(accent: model.accent(theme), dark: scheme == .dark,
+                              palette: session.config.style.palette(theme))
         GeometryReader { geo in
             ScrollView {
                 VStack(spacing: 14) {
@@ -177,8 +179,9 @@ struct ThumbsSheetView: View {
                         Image(uiImage: image)
                             .resizable()
                             .scaledToFit()
-                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(look.line, lineWidth: 1))
+                            .clipShape(RoundedRectangle(cornerRadius: look.card(10), style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: look.card(10), style: .continuous)
+                                .stroke(look.line, lineWidth: look.border))
                     }
                     .buttonStyle(.plain)
                     .disabled(!model.showsMarkup || !model.toolsEnabled)
@@ -211,8 +214,9 @@ struct ThumbsSheetView: View {
                 .padding(4)
             }
         }
-        .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(look.surface))
-        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(look.line, lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: look.card(16), style: .continuous).fill(look.surface))
+        .overlay(RoundedRectangle(cornerRadius: look.card(16), style: .continuous)
+            .stroke(look.line, lineWidth: look.border))
     }
 
     private func videoCard(_ model: ThumbsSheetModel, _ look: ThumbsLook) -> some View {
@@ -235,7 +239,9 @@ struct ThumbsSheetView: View {
     }
 
     private func tools(_ model: ThumbsSheetModel, _ look: ThumbsLook) -> some View {
-        AdaptiveRow(vertical: typeSize.isAccessibilitySize) {
+        // Three buttons don't fit one row on a phone at large text sizes
+        let count = [model.showsMarkup, model.showsRecord, model.showsBrowse].filter { $0 }.count
+        return AdaptiveRow(vertical: typeSize.isAccessibilitySize || (count > 2 && typeSize > .large)) {
             if model.showsMarkup {
                 Button { session.openMarkup() } label: {
                     if session.preparingMarkup {
@@ -251,6 +257,11 @@ struct ThumbsSheetView: View {
             if model.showsRecord {
                 Button { session.record() } label: { Label(text.record, systemImage: "record.circle") }
                     .buttonStyle(NeonButtonStyle(color: look.negative, on: false, look: look))
+            }
+            if model.showsBrowse {
+                Button { session.browse() } label: { Label(text.browse, systemImage: "hand.draw") }
+                    .buttonStyle(NeonButtonStyle(color: look.ink, on: false, look: look))
+                    .accessibilityHint(text.browseHint)
             }
         }
         .disabled(!model.toolsEnabled)
@@ -302,9 +313,9 @@ struct ThumbsSheetView: View {
                             .accessibilityHidden(true)
                     }
                 }
-                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(look.surface))
-                .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(messageFocused ? look.positive : look.line, lineWidth: 1))
+                .background(RoundedRectangle(cornerRadius: look.card(14), style: .continuous).fill(look.surface))
+                .overlay(RoundedRectangle(cornerRadius: look.card(14), style: .continuous)
+                    .stroke(messageFocused ? look.positive : look.line, lineWidth: look.border))
                 .shadow(color: messageFocused ? look.positive.opacity(look.glow) : .clear, radius: 6)
                 .disabled(!model.messageEnabled)
                 .opacity(model.messageEnabled ? 1 : 0.6)
@@ -356,7 +367,8 @@ struct ClearTextEditorBackground: ViewModifier {
     }
 }
 
-/// The annotate page's colours, for one appearance, with the configured or neon accent.
+/// The sheet's colours for one appearance: qaid's own, with whatever the app's
+/// `QaidStyle` palette and accent set laid over them.
 struct ThumbsLook {
     let positive: Color
     let negative: Color
@@ -366,21 +378,40 @@ struct ThumbsLook {
     let ink: Color
     let muted: Color
     let line: Color
-    /// How strongly the neon glows.
+    /// Send's fill, when the app set one; nil keeps the neon outline.
+    let primary: Color?
+    let onPrimary: Color
+    /// The app's corner radius; nil keeps qaid's (rounded cards, capsule buttons).
+    let radius: CGFloat?
+    let border: CGFloat
+    /// How strongly the neon glows; 0 for none.
     let glow: Double
 
-    init(accent: NeonAccent, dark: Bool) {
+    init(accent: NeonAccent, dark: Bool, palette: QaidPalette = QaidPalette()) {
         let fallback = NeonAccent.forTheme(dark ? .dark : .light)
-        positive = Color(hex: accent.positive) ?? Color(hex: fallback.positive)!
-        negative = Color(hex: accent.negative) ?? Color(hex: fallback.negative)!
-        background = Color(hex: dark ? "#0a0a0a" : "#f3f4f6")!
-        surface = Color(hex: dark ? "#111111" : "#ffffff")!
-        surface2 = Color(hex: dark ? "#171717" : "#f9fafb")!
-        ink = Color(hex: dark ? "#f5f5f5" : "#111827")!
-        muted = Color(hex: dark ? "#a3a3a3" : "#4b5563")!
-        line = Color(hex: dark ? "#262626" : "#d1d5db")!
-        glow = dark ? 0.55 : 0.3
+        func pick(_ app: String?, _ qaid: String) -> Color {
+            app.flatMap { Color(hex: $0) } ?? Color(hex: qaid)!
+        }
+        positive = palette.positive.flatMap { Color(hex: $0) }
+            ?? Color(hex: accent.positive) ?? Color(hex: fallback.positive)!
+        negative = palette.negative.flatMap { Color(hex: $0) }
+            ?? Color(hex: accent.negative) ?? Color(hex: fallback.negative)!
+        background = pick(palette.background, dark ? "#0a0a0a" : "#f3f4f6")
+        surface = pick(palette.surface, dark ? "#111111" : "#ffffff")
+        // The button fill: a touch off the card, or the card itself in the app's colours.
+        surface2 = palette.surface.flatMap { Color(hex: $0) } ?? Color(hex: dark ? "#171717" : "#f9fafb")!
+        ink = pick(palette.ink, dark ? "#f5f5f5" : "#111827")
+        muted = pick(palette.muted, dark ? "#a3a3a3" : "#4b5563")
+        line = pick(palette.line, dark ? "#262626" : "#d1d5db")
+        primary = palette.primary.flatMap { Color(hex: $0) }
+        onPrimary = pick(palette.onPrimary, "#ffffff")
+        radius = palette.cornerRadius.map { CGFloat(max(0, $0)) }
+        border = CGFloat(max(0, palette.borderWidth ?? 1))
+        glow = palette.glow == false ? 0 : (dark ? 0.55 : 0.3)
     }
+
+    /// A card's corner: the app's radius, else qaid's for that card.
+    func card(_ qaid: CGFloat) -> CGFloat { radius ?? qaid }
 
     func tone(_ tone: ThumbsSheetModel.Tone) -> Color {
         switch tone {
@@ -403,7 +434,8 @@ extension Color {
 }
 
 /// A neon capsule: the colour's outline and glow, filled when on. At least 44 points
-/// tall (50 for Send), and dimmed when disabled.
+/// tall (50 for Send), and dimmed when disabled. In an app's style it takes the app's
+/// corners and outline, and Send (`tall`, `on`) is filled with the app's primary colour.
 struct NeonButtonStyle: ButtonStyle {
     let color: Color
     let on: Bool
@@ -422,20 +454,34 @@ struct NeonButtonStyle: ButtonStyle {
         let tall: Bool
         @Environment(\.isEnabled) private var isEnabled
 
+        private var solid: Color? { tall && on ? look.primary : nil }
+
         var body: some View {
+            let shape = ButtonShape(radius: look.radius)
             configuration.label
                 .font(tall ? .body.weight(.bold) : .body.weight(.semibold))
-                .foregroundColor(color)
+                .foregroundColor(solid == nil ? color : look.onPrimary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
                 .frame(maxWidth: .infinity, minHeight: tall ? 50 : 44)
-                .background(Capsule().fill(on ? color.opacity(0.14) : look.surface2))
-                .overlay(Capsule().stroke(color, lineWidth: 1))
-                .shadow(color: isEnabled ? color.opacity(on ? 0.8 : look.glow) : .clear, radius: on ? 8 : 3)
+                .background(shape.fill(solid ?? (on ? color.opacity(0.14) : look.surface2)))
+                .overlay(shape.stroke(solid == nil ? color : look.line, lineWidth: look.border))
+                .shadow(color: isEnabled && look.glow > 0 ? color.opacity(on ? 0.8 : look.glow) : .clear,
+                        radius: on ? 8 : 3)
                 .opacity(isEnabled ? (configuration.isPressed ? 0.75 : 1) : 0.45)
-                .contentShape(Capsule())
+                .contentShape(shape)
         }
+    }
+}
+
+/// A capsule, or a rounded rectangle at the app's radius.
+struct ButtonShape: Shape {
+    let radius: CGFloat?
+
+    func path(in rect: CGRect) -> Path {
+        guard let radius else { return Capsule().path(in: rect) }
+        return RoundedRectangle(cornerRadius: radius, style: .continuous).path(in: rect)
     }
 }
 

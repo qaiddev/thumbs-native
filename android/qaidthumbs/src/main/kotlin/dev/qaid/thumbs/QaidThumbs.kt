@@ -171,8 +171,9 @@ object QaidThumbs {
      *
      * @param screen where the person is ("Errands"): appended to the page URL and stored with
      *   the report. The last [setScreen] when null.
-     * @param dark the sheet's theme; the activity's night mode when null. Pass the app's own
-     *   choice when it overrides the system's.
+     * @param dark the sheet's theme. Null uses [QaidThumbsConfig.style]'s appearance, and with
+     *   that SYSTEM, the activity's night mode. Pass the app's own choice when it overrides the
+     *   system's.
      * @param delayMs lets a menu or ripple that triggered this settle first, so the screenshot
      *   shows the app as the person saw it.
      *
@@ -184,8 +185,9 @@ object QaidThumbs {
         val config = config ?: error("QaidThumbs.configure() must be called before present()")
         if (session != null || Recording.isRecording) return
         ReportQueue.attach(activity)
-        val isDark = dark ?: ((activity.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
-            Configuration.UI_MODE_NIGHT_YES)
+        val isDark = config.style.forcedDark(dark)
+            ?: ((activity.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+                Configuration.UI_MODE_NIGHT_YES)
         val next = ThumbsSession(activity, config, screen ?: currentScreen, isDark, capturer) { finished ->
             if (session === finished) session = null
         }

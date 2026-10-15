@@ -19,7 +19,7 @@ class MetadataTest {
             meta.keys().asSequence().toSet(),
         )
         assertEquals("Google Pixel 8", meta.getString("device"))
-        assertEquals("qaid-android/0.3.0", meta.getString("sdk"))
+        assertEquals("qaid-android/0.4.0", meta.getString("sdk"))
         assertFalse(ReportMetadata.build(device, null, "native").has("screen"))
         assertFalse(ReportMetadata.build(device, "", "native").has("screen"))
     }

@@ -77,6 +77,16 @@ data class QaidText(
     val discardTitle: String = "Discard this feedback?",
     val discardConfirm: String = "Discard",
     val discardCancel: String = "Keep editing",
+
+    // New in 0.4.0, named as on iOS: leaving the sheet to move around the app.
+    /** The sheet's button that shrinks it to a pill. */
+    val browse: String = "Move around",
+    /** On the pill: retake the screenshot of the screen now showing, then reopen. */
+    val browseCapture: String = "Use this screen",
+    /** On the pill: reopen with the screenshot as it was. */
+    val browseBack: String = "Back",
+    /** Read by TalkBack when the sheet shrinks to the pill. */
+    val browseHint: String = "Go to the screen with the problem, then tap Use this screen.",
 ) {
     /** [subtitle] with `{app}` filled in. */
     fun subtitle(appName: String): String = subtitle.replace(APP_TOKEN, appName)

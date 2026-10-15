@@ -68,8 +68,12 @@ internal data class ThumbsSheetModel(
     val attachment: SheetAttachment,
     /** The app allows recording and the device can; never offered once there is a recording. */
     val recordingAllowed: Boolean = false,
+    /** The app allows moving around with the sheet shrunk to a pill. */
+    val browsingAllowed: Boolean = false,
     val configuredAccent: NeonAccent? = null,
     val palette: List<String> = QaidThumbsConfig.DEFAULT_PALETTE,
+    /** The app's colours and shapes for the sheet. */
+    val style: QaidStyle = QaidStyle(),
     val kind: FeedbackKind = FeedbackKind.NEUTRAL,
     val message: String = "",
     /** A send is running. */
@@ -102,7 +106,13 @@ internal data class ThumbsSheetModel(
     val showsMarkup: Boolean get() = showsImage && !finished
     val showsRemove: Boolean get() = showsImage && !finished
     val showsRecord: Boolean get() = recordingAllowed && !isVideo && !finished
-    val showsTools: Boolean get() = showsMarkup || showsRecord
+
+    /**
+     * "Move around", to retake the screenshot elsewhere: not once there is a recording, which
+     * already shows the moving around, and never once sent.
+     */
+    val showsBrowse: Boolean get() = browsingAllowed && !isVideo && !finished
+    val showsTools: Boolean get() = showsMarkup || showsRecord || showsBrowse
 
     /** Remove, Mark up (and the screenshot that opens it) and Record wait while a send is running. */
     val toolsEnabled: Boolean get() = !busy
@@ -166,6 +176,16 @@ internal data class ThumbsSheetModel(
     fun withMarkup(dataUrl: String): ThumbsSheetModel =
         if (!showsMarkup || !toolsEnabled) this else copy(attachment = SheetAttachment.Image(dataUrl), screenshotEdited = true)
 
+    /**
+     * A screenshot retaken after moving around replaces whatever was attached; the thumbs and
+     * words stay. Null (the capture failed), or anything but an image data URL, leaves none.
+     */
+    fun retakingScreenshot(dataUrl: String?): ThumbsSheetModel {
+        if (finished || isVideo) return this
+        val image = dataUrl?.takeIf(Screenshots::isImageDataUrl)
+        return copy(attachment = image?.let { SheetAttachment.Image(it) } ?: SheetAttachment.None, screenshotEdited = true)
+    }
+
     /** What the big button does now, or null while it is disabled. */
     fun primary(): PrimaryAction? = when {
         finished -> PrimaryAction.Close
@@ -200,8 +220,11 @@ internal data class ThumbsSheetModel(
             appName = config.appName,
             attachment = attachment,
             recordingAllowed = config.allowRecording && deviceCanRecord,
+            // Every sheet comes from QaidThumbs.present, which can take it down and bring it back.
+            browsingAllowed = config.allowBrowsing,
             configuredAccent = config.accent,
             palette = config.palette,
+            style = config.style,
         )
     }
 }

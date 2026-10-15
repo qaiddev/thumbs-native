@@ -137,7 +137,7 @@ class QaidThumbsFlowTest {
         assertEquals("works", body.getString("message"))
         assertTrue(body.getString("pageUrl").endsWith("/home"))
         assertTrue(body.getString("screenshot").startsWith("data:image/"))
-        assertTrue(body.getString("userAgent").contains("QaidThumbs/0.3.0"))
+        assertTrue(body.getString("userAgent").contains("QaidThumbs/0.4.0"))
         val quest = quests.single()
         assertEquals("q_up", quest.questId)
         assertEquals("fb_1", quest.feedbackId)
@@ -385,5 +385,75 @@ class QaidThumbsFlowTest {
         compose.waitUntil(5_000) { idle(); exists(ThumbsTags.SHEET) }
         tag(ThumbsTags.UP).assertIsOn()
         compose.onNodeWithText("kept").assertExists()
+    }
+
+    /** A plain View laid over [activity]'s window with exactly this text: the move-around pill's buttons. */
+    private fun pillButton(label: String, activity: Activity = compose.activity): android.widget.TextView? {
+        fun find(view: android.view.View): android.widget.TextView? = when (view) {
+            is android.widget.TextView -> view.takeIf { it.text.toString() == label }
+            is android.view.ViewGroup -> (0 until view.childCount).asSequence().mapNotNull { find(view.getChildAt(it)) }.firstOrNull()
+            else -> null
+        }
+        return find(activity.window.decorView)
+    }
+
+    @Test fun moveAroundShrinksToAPillAndUseThisScreenRetakesTheShot() {
+        var shots = 0
+        QaidThumbs.capturer = ScreenCapturer { _, _, done ->
+            shots++
+            done(Bitmap.createBitmap(200, 400, Bitmap.Config.ARGB_8888).apply { eraseColor(if (shots == 1) Color.WHITE else Color.BLUE) })
+        }
+        present()
+        tag(ThumbsTags.DOWN).performClick()
+        tag(ThumbsTags.MESSAGE).performTextInput("the list jumps")
+        tag(ThumbsTags.BROWSE).performClick()
+        idle()
+        assertTrue("the sheet is down while the person moves around", !exists(ThumbsTags.SHEET))
+        val use = pillButton("Use this screen")
+        assertTrue("the pill is up", use != null)
+        compose.runOnUiThread { use!!.performClick() }
+        compose.waitUntil(5_000) { idle(); exists(ThumbsTags.SHEET) }
+        assertEquals("the screen was captured again", 2, shots)
+        assertNull("the pill is gone", pillButton("Use this screen"))
+        tag(ThumbsTags.DOWN).assertIsOn()
+        compose.onNodeWithText("the list jumps").assertExists()
+    }
+
+    @Test fun backFromThePillKeepsTheShotItHad() {
+        var shots = 0
+        QaidThumbs.capturer = ScreenCapturer { _, _, done ->
+            shots++
+            done(Bitmap.createBitmap(200, 400, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.WHITE) })
+        }
+        present()
+        tag(ThumbsTags.BROWSE).performClick()
+        idle()
+        compose.runOnUiThread { pillButton("Back")!!.performClick() }
+        compose.waitUntil(5_000) { idle(); exists(ThumbsTags.SHEET) }
+        assertEquals("no second capture", 1, shots)
+        assertTrue(exists(ThumbsTags.IMAGE))
+    }
+
+    @Test fun thePillFollowsThePersonToAnotherActivityAndCloseTakesItAway() {
+        present()
+        tag(ThumbsTags.BROWSE).performClick()
+        idle()
+        val other = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+        idle()
+        assertTrue("on the activity now resumed", pillButton("Use this screen", other.get()) != null)
+        compose.runOnUiThread { QaidThumbs.closeSession() }
+        idle()
+        assertNull(pillButton("Use this screen", other.get()))
+        compose.runOnUiThread { other.pause().stop().destroy() }
+    }
+
+    @Test fun anAppStyleForcesTheSheetsAppearance() {
+        QaidThumbs.configure(compose.activity, config.copy(style = dev.qaid.thumbs.core.QaidStyle(
+            appearance = dev.qaid.thumbs.core.QaidAppearance.LIGHT,
+            light = dev.qaid.thumbs.core.QaidPalette(primary = "#FB702C", cornerRadius = 0f),
+        )))
+        present(dark = null)
+        tag(ThumbsTags.SEND).assertExists()
+        tag(ThumbsTags.BROWSE).assertExists()
     }
 }

@@ -91,7 +91,8 @@ class ThumbsSheetModelTest {
         assertFalse(ThumbsSheetModel.create(config.copy(allowRecording = false), SheetAttachment.None, true).showsRecord)
         val noDevice = sheet(SheetAttachment.None, canRecord = false)
         assertFalse(noDevice.showsRecord)
-        assertFalse(noDevice.showsTools)
+        assertTrue("Move around still needs the tools row", noDevice.showsTools)
+        assertFalse(sheet(SheetAttachment.None, canRecord = false).copy(browsingAllowed = false).showsTools)
     }
 
     @Test fun thumbsToggleLikeThePage() {

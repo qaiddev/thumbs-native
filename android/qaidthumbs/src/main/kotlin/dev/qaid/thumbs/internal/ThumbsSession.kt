@@ -67,6 +67,9 @@ internal class ThumbsSession(
     /** The sheet should be up, but no activity can hold it yet: it goes up on the next one resumed. */
     private var waiting = false
     private var recording = false
+
+    /** The "Use this screen / Back" pill, while the person moves around the app. */
+    private var browsing: BrowseOverlay? = null
     private var sending: Job? = null
     private var finished = false
 
@@ -90,7 +93,7 @@ internal class ThumbsSession(
 
     /** The sheet, on the resumed activity — or, with none, as soon as one resumes. */
     private fun show() {
-        if (finished || recording || dialog != null) return
+        if (finished || recording || browsing != null || dialog != null) return
         val activity = resumed?.get()?.takeIf { it.isUsable() }
         if (activity == null) {
             waiting = true
@@ -119,6 +122,8 @@ internal class ThumbsSession(
 
     override fun onActivityResumed(activity: Activity) {
         resumed = WeakReference(activity)
+        // Moving around: the pill follows the person to the screen they opened.
+        browsing?.moveTo(activity)
         if (waiting) show()
     }
 
@@ -127,6 +132,8 @@ internal class ThumbsSession(
     }
 
     override fun onActivityDestroyed(activity: Activity) {
+        // The pill goes with its window; it comes back on the next activity resumed.
+        browsing?.takeIf { it.isOn(activity) }?.remove()
         if (host?.get() !== activity) return
         // The window can't outlive its activity. A rotation (or the system reclaiming it) brings
         // the sheet back on the next activity resumed; an activity that is finishing ends the report.
@@ -216,6 +223,43 @@ internal class ThumbsSession(
         }
     }
 
+    /**
+     * The sheet shrinks to a pill; the app is the person's again until they tap it. "Use this
+     * screen" retakes the screenshot of wherever they went (the pill is taken off first, so it
+     * isn't in the shot); Back brings the sheet back as it was. The draft survives either way,
+     * as it does a recording.
+     */
+    override fun onBrowse(draft: ThumbsSheetModel) {
+        val sheet = state ?: return
+        if (finished || recording || browsing != null || !sheet.model.showsBrowse || !sheet.model.toolsEnabled) return
+        val activity = host?.get() ?: return
+        hide()
+        browsing = BrowseOverlay(activity, config.text, config.style.palette(dark), dark) { capture ->
+            endBrowsing(capture)
+        }.also { it.show() }
+        activity.window.decorView.announceForAccessibility(config.text.browseHint)
+    }
+
+    private fun endBrowsing(capture: Boolean) {
+        val pill = browsing ?: return
+        browsing = null
+        val activity = pill.activity?.takeIf { it.isUsable() } ?: resumed?.get()?.takeIf { it.isUsable() }
+        pill.remove()
+        if (!capture || activity == null) return show()
+        // A frame for the pill to leave the screen before the capture.
+        activity.window.decorView.post {
+            capturer.capture(activity, config.maskSensitiveViews) { bitmap ->
+                scope.launch {
+                    val shot = bitmap?.let {
+                        withContext(Dispatchers.Default) { ScreenCapture.dataUrl(it).also { _ -> it.recycle() } }
+                    }
+                    state?.let { it.model = it.model.retakingScreenshot(shot) }
+                    show()
+                }
+            }
+        }
+    }
+
     override fun onClose() = close()
 
     /** Ends the report now, mid-send or not. Tests and Cancel. */
@@ -229,6 +273,8 @@ internal class ThumbsSession(
         if (finished) return
         finished = true
         waiting = false
+        browsing?.remove()
+        browsing = null
         application.unregisterActivityLifecycleCallbacks(this)
         video?.file?.delete()
         video = null

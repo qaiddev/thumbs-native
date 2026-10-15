@@ -138,8 +138,9 @@ struct MarkupEditorView: View {
         // Use has taken the marks as they were: nothing changes them, and Back can't race it.
         .disabled(rendering)
         .padding(10)
-        .background(RoundedRectangle(cornerRadius: 18, style: .continuous).fill(look.surface))
-        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(look.line, lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: look.card(18), style: .continuous).fill(look.surface))
+        .overlay(RoundedRectangle(cornerRadius: look.card(18), style: .continuous)
+            .stroke(look.line, lineWidth: look.border))
     }
 
     /// Flattens off the main thread. `.unchanged` (no marks) closes like Back; `.failed`

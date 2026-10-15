@@ -56,6 +56,7 @@ package struct ThumbsSheetModel: Equatable, Sendable {
     /// The screenshot was marked up or removed: work a dismissal would lose.
     package private(set) var screenshotEdited = false
     private let allowRecording: Bool
+    private let allowBrowsing: Bool
 
     package init(config: QaidThumbsConfiguration, attachment: ThumbsAttachment, allowRecording: Bool = true,
                  kind: FeedbackKind = .neutral, message: String = "") {
@@ -64,6 +65,9 @@ package struct ThumbsSheetModel: Equatable, Sendable {
         configuredAccent = config.accent
         self.attachment = attachment
         self.allowRecording = config.allowRecording && allowRecording
+        // Leaving the sheet to move around is the same trip out as recording: only a host
+        // that can take the sheet away and bring it back (`present()`) offers either.
+        self.allowBrowsing = config.allowBrowsing && allowRecording
         self.kind = kind
         self.message = String(message.prefix(FeedbackRequests.maxMessageLength))
     }
@@ -101,7 +105,10 @@ package struct ThumbsSheetModel: Equatable, Sendable {
     package var showsMarkup: Bool { hasImage && !finished }
     /// Only until there is a recording, and never once sent.
     package var showsRecord: Bool { allowRecording && !isVideo && !finished }
-    package var showsTools: Bool { showsMarkup || showsRecord }
+    /// "Move around", to retake the screenshot elsewhere: not once there is a recording,
+    /// which already shows the moving around, and never once sent.
+    package var showsBrowse: Bool { allowBrowsing && !isVideo && !finished }
+    package var showsTools: Bool { showsMarkup || showsRecord || showsBrowse }
     /// Remove, Mark up and Record wait while a send is running.
     package var toolsEnabled: Bool { !busy }
 
@@ -179,6 +186,18 @@ package struct ThumbsSheetModel: Equatable, Sendable {
     package mutating func applyMarkup(_ dataUrl: String) {
         guard showsMarkup, toolsEnabled, FeedbackRequests.isImageDataUrl(dataUrl) else { return }
         attachment = .image(dataUrl: dataUrl)
+        screenshotEdited = true
+    }
+
+    /// A screenshot retaken after moving around replaces whatever was attached; the thumbs
+    /// and words stay. nil (the capture failed) leaves no screenshot.
+    package mutating func retakeScreenshot(_ dataUrl: String?) {
+        guard !finished, !isVideo else { return }
+        if let dataUrl, FeedbackRequests.isImageDataUrl(dataUrl) {
+            attachment = .image(dataUrl: dataUrl)
+        } else {
+            attachment = .none
+        }
         screenshotEdited = true
     }
 

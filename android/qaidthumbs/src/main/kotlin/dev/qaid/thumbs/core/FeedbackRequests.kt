@@ -10,7 +10,7 @@ import java.io.File
 import kotlin.math.roundToInt
 
 object QaidThumbsSdk {
-    const val VERSION = "0.3.0"
+    const val VERSION = "0.4.0"
 }
 
 /**

@@ -53,14 +53,16 @@ public enum QaidThumbs {
     ///     with the report. nil uses the last `setScreen(_:)`.
     ///   - delay: lets a menu or popover that triggered this finish closing first, so
     ///     the screenshot shows the app rather than the menu.
+    ///   - dark: the app's own light/dark choice, which a UIKit sheet doesn't inherit from
+    ///     SwiftUI's `.preferredColorScheme`. nil uses `configuration.style.appearance`.
     public static func present(from presenter: UIViewController? = nil, screen: String? = nil,
-                               delay: TimeInterval = 0.35) {
+                               delay: TimeInterval = 0.35, dark: Bool? = nil) {
         guard let configuration else {
             assertionFailure("QaidThumbs.configure(_:) must be called before present()")
             return
         }
         guard !isShowingSheet, !ScreenRecorder.shared.isRecording else { return }
-        let coordinator = FeedbackCoordinator(config: configuration, screen: screen ?? diagnostics.screen)
+        let coordinator = FeedbackCoordinator(config: configuration, screen: screen ?? diagnostics.screen, dark: dark)
         self.coordinator = coordinator
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
             coordinator.start(presenter: presenter)
