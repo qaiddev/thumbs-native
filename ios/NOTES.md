@@ -1,10 +1,13 @@
-# QaidThumbs (iOS) 0.3.0 — public API
+# QaidThumbs (iOS) 0.4.0 — public API
 
 SwiftPM product `QaidThumbs` (iOS 15+), repo github.com/qaiddev/thumbs-native.
 `import QaidThumbs` re-exports the public types of `QaidThumbsCore`.
 
 0.3.0 renames 0.2's `QaidFeedback` and draws the sheet natively (SwiftUI). There is no
 web view, no bridge, no fallback form and no `annotateURL` any more.
+
+0.4.0 adds `style` (the sheet in the app's own colours, corners and light/dark),
+`present(dark:)`, and Move around (`allowBrowsing`, `text.browse*`). All additive.
 
 ## QaidThumbs (`@MainActor public enum`)
 
@@ -15,7 +18,7 @@ public static var isRecording: Bool { get }
 public static var onLinkedQuest: ((QaidLinkedQuest) -> Void)?
 public static func configure(_ configuration: QaidThumbsConfiguration)
 public static func present(from presenter: UIViewController? = nil, screen: String? = nil,
-                           delay: TimeInterval = 0.35)
+                           delay: TimeInterval = 0.35, dark: Bool? = nil)   // dark: nil → style.appearance
 public static func captureScreenshot() -> UIImage?
 nonisolated public static func setUser(id: String? = nil, email: String? = nil, name: String? = nil)
 nonisolated public static func clearUser()
@@ -63,8 +66,10 @@ public struct QaidThumbsConfiguration: Equatable {
     public var pageUrl: URL?                 // nil → app://<bundle id>
     public var appName: String
     public var accent: NeonAccent?           // nil → neon pair for the system theme
+    public var style: QaidStyle              // 0.4.0; default QaidStyle() = qaid's neon look
     public var palette: [String]             // markup colours, "#rgb" / "#rrggbb" / "#rrggbbaa"
     public var allowRecording: Bool
+    public var allowBrowsing: Bool           // 0.4.0; Move around, present() only
     public var maxVideoBytes: Int
     public var maxRecordingSeconds: TimeInterval
     public var text: QaidText
@@ -73,14 +78,38 @@ public struct QaidThumbsConfiguration: Equatable {
     public var captureLogs: Bool
     public var maskSensitiveViews: Bool
     public init(apiKey: String, endpoint: URL = URL(string: "https://qaid.dev/api/feedback")!,
-                pageUrl: URL? = nil, appName: String, accent: NeonAccent? = nil,
+                pageUrl: URL? = nil, appName: String, accent: NeonAccent? = nil, style: QaidStyle = QaidStyle(),
                 palette: [String] = QaidThumbsConfiguration.defaultPalette, allowRecording: Bool = true,
+                allowBrowsing: Bool = true,
                 maxVideoBytes: Int = 48 * 1024 * 1024, maxRecordingSeconds: TimeInterval = 180,
                 text: QaidText = QaidText(), quests: QaidQuestLinks? = nil, questsBase: URL? = nil,
                 captureLogs: Bool = true, maskSensitiveViews: Bool = true)
     public static let defaultPalette: [String]   // ["#ff0066", "#00ff88", "#00e5ff", "#ffe600", "#ffffff", "#111827"]
     public var videoEndpoint: URL { get }
     public static func defaultPageUrl(bundleIdentifier: String) -> URL
+}
+
+public enum QaidAppearance: String, Equatable, Sendable { case system, light, dark }
+
+public struct QaidStyle: Equatable, Sendable {
+    public var appearance: QaidAppearance    // .system
+    public var light: QaidPalette
+    public var dark: QaidPalette
+    public init(appearance: QaidAppearance = .system, light: QaidPalette = QaidPalette(),
+                dark: QaidPalette = QaidPalette())
+    public func palette(_ theme: QaidTheme) -> QaidPalette
+    public func forcedTheme(dark: Bool?) -> QaidTheme?   // the call's choice, else appearance; nil follows the screen
+}
+
+// Every field optional; nil keeps qaid's. Colours "#rgb" / "#rrggbb" / "#rrggbbaa".
+public struct QaidPalette: Equatable, Sendable {
+    public var background, surface, ink, muted, line: String?
+    public var primary: String?              // set → Send is solid in it
+    public var onPrimary: String?            // Send's text, default white
+    public var positive, negative: String?   // override accent
+    public var cornerRadius: Double?         // 0 square; nil → qaid's cards and capsules
+    public var borderWidth: Double?          // default 1
+    public var glow: Bool?                   // default on
 }
 
 public struct QaidQuestLinks: Equatable {
@@ -111,7 +140,7 @@ public struct NeonAccent: Codable, Equatable, Sendable {
     public static func forTheme(_ theme: QaidTheme) -> NeonAccent
 }
 
-public enum QaidThumbsSDK { public static let version: String }   // "0.3.0"
+public enum QaidThumbsSDK { public static let version: String }   // "0.4.0"
 ```
 
 ## QaidText (`public struct QaidText: Equatable, Sendable`)
@@ -128,7 +157,8 @@ recordingFailed, errorNotConfigured, errorSetup, errorRecordingsOff, errorQuota,
 errorTooLarge, errorServer, errorOffline, **markupFailed, discardTitle, discardConfirm,
 discardCancel** (new in 0.3.0, appended so existing calls compile; same names and English
 as Android: "Couldn't add the marks. Try Use again.", "Discard this feedback?", "Discard",
-"Keep editing").
+"Keep editing"), **browse, browseCapture, browseBack, browseHint** (new in 0.4.0: "Move around",
+"Use this screen", "Back", "Go to the screen with the problem, then tap Use this screen.").
 
 ```swift
 public func subtitle(appName: String) -> String
