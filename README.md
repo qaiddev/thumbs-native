@@ -9,8 +9,16 @@ recording. Its sister SDK, [quests-native](https://github.com/qaiddev/quests-nat
 
 | Platform | Install | Needs |
 | --- | --- | --- |
-| iOS | Swift Package Manager: `https://github.com/qaiddev/thumbs-native`, product `QaidThumbs` | iOS 15+ |
-| Android | `implementation("dev.qaid:thumbs:0.3.0")` from Maven Central | minSdk 26, compileSdk 35+, Compose compiler plugin |
+| iOS | Swift Package Manager: `https://github.com/qaiddev/thumbs-native`, product `QaidThumbs`, from `0.4.0` | iOS 15+ |
+| Android | The `android/qaidthumbs` module from this repo (`dev.qaid:thumbs:0.4.0` is not on Maven Central yet) | minSdk 26, compileSdk 35+, Compose compiler plugin |
+
+<p>
+  <img alt="The feedback sheet in dark mode, with a screenshot of the app, Not working picked and a message" src="https://raw.githubusercontent.com/qaiddev/thumbs-native/prod/docs/screenshots/sheet-dark.png" width="260">
+  <img alt="The markup editor with a pink box drawn round the Add to cart button" src="https://raw.githubusercontent.com/qaiddev/thumbs-native/prod/docs/screenshots/markup.png" width="260">
+  <img alt="The feedback sheet in light mode, with Works well picked" src="https://raw.githubusercontent.com/qaiddev/thumbs-native/prod/docs/screenshots/sheet-light.png" width="260">
+</p>
+
+The sheet, the markup editor, and the sheet in light mode, as drawn on Android.
 
 You need your project's **embed key**: in qaid, open the project, then **Settings** → **API Keys**. It is the
 same key the web embed uses, and it is safe to ship in an app.
@@ -155,13 +163,6 @@ With no `pageUrl`, reports are sent as `app://<bundle id>`, which qaid reads bac
 `com.example.myapp` passes a restriction of `example.com`. Otherwise set `pageUrl` to an address on the
 restricted domain.
 
-## Upgrading from 0.2 (`QaidFeedback`)
-
-0.3.0 renames `QaidFeedback` → `QaidThumbs`, `QaidConfiguration`/`QaidConfig` →
-`QaidThumbsConfiguration`/`QaidThumbsConfig`, the Swift product to `QaidThumbs` and the artifact to
-`dev.qaid:thumbs`. The web-view sheet and `annotateURL` are gone. The visitor id and offline queue keep
-their 0.2 names on disk, so queued reports still send after the upgrade.
-
 ## Develop
 
 ```sh
@@ -174,6 +175,15 @@ Release: bump `QaidThumbsSDK.version`, `QaidThumbsSdk.VERSION` and the coordinat
 `android/build.gradle.kts`; tag `x.y.z` (the tag is the Swift release); then from `android/` run
 `./gradlew --no-daemon :qaidthumbs:publishAndReleaseToMavenCentral` with `mavenCentralUsername`,
 `mavenCentralPassword` and `signingInMemoryKey` in `~/.gradle/gradle.properties`.
+
+Screenshots: the README's pictures are drawn by Robolectric, no device needed. From `android/`:
+
+```sh
+QAID_SCREENSHOT_APP=app.png QAID_SCREENSHOT_DIR=../docs/screenshots \
+  ./gradlew --no-daemon :qaidthumbs:testDebugUnitTest --tests '*ReadmeScreenshots*'
+```
+
+`app.png` is any phone-sized picture standing in for the app's screen.
 
 ## Coverage
 

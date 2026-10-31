@@ -1,6 +1,6 @@
 # qaid thumbs for Android — notes
 
-Artifact `dev.qaid:thumbs:0.3.0` (was `dev.qaid:feedback:0.2.0`), module `:qaidthumbs`,
+Artifact `dev.qaid:thumbs:0.4.0` (not on Maven Central yet), module `:qaidthumbs`,
 namespace `dev.qaid.thumbs`, minSdk 26, AAR `minCompileSdk` 35.
 Compose BOM 2026.04.01 (Compose 1.11, Material 3 1.4), core-ktx 1.16.0, activity-ktx 1.10.1,
 okhttp 5.3.2 (`api`), coroutines 1.11.0. No WebView, no androidx.webkit.
@@ -11,7 +11,7 @@ okhttp 5.3.2 (`api`), coroutines 1.11.0. No WebView, no androidx.webkit.
 (no version in the module file). An app that includes it by source must have the Compose
 compiler plugin on its classpath at its own Kotlin version (`id("org.jetbrains.kotlin.plugin.compose")
 apply false` in the root build), and point `project(":qaidthumbs").projectDir` at
-`android/qaidthumbs` (was `android/qaidfeedback`). Publishing and Kover are applied only from
+`android/qaidthumbs`. Publishing and Kover are applied only from
 `android/build.gradle.kts`.
 
 ## Public API
@@ -40,7 +40,7 @@ object QaidThumbs {
 var View.qaidSensitive: Boolean
 
 // dev.qaid.thumbs.core
-object QaidThumbsSdk { const val VERSION = "0.3.0" }
+object QaidThumbsSdk { const val VERSION = "0.4.0" }
 
 data class QaidThumbsConfig(
     val apiKey: String,
@@ -125,36 +125,27 @@ data class QaidText(/* every string; see below */) {
 }
 ```
 
-`QaidText` keys: every 0.2 key is kept (`title subtitle cancel close markup record positive
+`QaidText` keys (`title subtitle cancel close markup record positive
 negative kindLabel messageLabel placeholder send done sending sent queued retry noScreenshot
 removeScreenshot screenRecording markupTitle markupHelp markupUse markupBack attachScreenshot
 recordInstead couldNotSend stop stopRecording recordingChannel recordingNotificationTitle
 recordingNotificationText recordingUnavailable recordingNotStarted recordingFailed recordingEmpty
 errorNotConfigured errorSetup errorRecordingsOff errorQuota errorTooLarge errorServer
-errorOffline`). New for the native editor, named as on iOS: `markupRectangle markupArrow
+errorOffline`). The markup editor's, named as on iOS: `markupRectangle markupArrow
 markupPen markupRedact markupUndo markupClear markupColor` ("Colour {n}").
-`attachScreenshot` and `recordInstead` are no longer drawn. Also new in 0.3.0, appended
-after `errorOffline`, same names and English as iOS: `markupFailed` ("Couldn't add the marks.
+`attachScreenshot` and `recordInstead` are kept but not drawn. After `errorOffline`, same names
+and English as iOS: `markupFailed` ("Couldn't add the marks.
 Try Use again."), `discardTitle` ("Discard this feedback?"), `discardConfirm` ("Discard"),
-`discardCancel` ("Keep editing"). New in 0.4.0, appended last, as iOS: `browse` ("Move
+`discardCancel` ("Keep editing"). Then Move around's, as iOS: `browse` ("Move
 around"), `browseCapture` ("Use this screen"), `browseBack` ("Back"), `browseHint` ("Go to
 the screen with the problem, then tap Use this screen.").
 
 Everything else is `internal`: the sheet (`ui/ThumbsSheet`, `ui/MarkupEditor`), the session,
-and the core plumbing that 0.2 had public (`FeedbackRequests`, `DeviceInfo`, `QaidResult`,
+and the core plumbing (`FeedbackRequests`, `DeviceInfo`, `QaidResult`,
 `RetryPolicy`, `VideoPolicy`, `QueuedReport`, `QueuePolicy`, `Masking`, `ShakeDetector`,
 `RingBuffer`, `ConsoleLogs`, `NetworkErrors`, `CustomMetadata`, `ReportMetadata`, `QaidUser`).
 
-## Removed in 0.3.0
-
-`QaidFeedback` (→ `QaidThumbs`), `QaidConfig` (→ `QaidThumbsConfig`), `QaidSdk` (→
-`QaidThumbsSdk`), `QaidConfig.annotateUrl` / `annotateOrigin` / `defaultAnnotateUrl` /
-`originOf`, `QaidText.shared()`, the bridge (`Bridge`, `BridgeTheme`, `BridgeAttachment`,
-`InitMessage`, `StatusMessage`, `QuestMessage`, `PageMessage`), the WebView dialog and its
-offline fallback form, the 15 s ready timeout, `androidx.webkit`.
-`NeonAccent.forTheme(BridgeTheme)` is now `forTheme(dark: Boolean)`.
-
-## Unchanged on disk (0.2 installs upgrade in place)
+## On disk
 
 - Visitor id: SharedPreferences `dev.qaid.feedback`, key `visitorId` — shared with qaid quests.
 - Offline queue: `noBackupFilesDir/qaid-queue/` (`<id>.json`, `<id>.mp4`, `<id>.tmp`), same format v1.

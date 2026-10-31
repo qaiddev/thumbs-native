@@ -3,11 +3,8 @@
 SwiftPM product `QaidThumbs` (iOS 15+), repo github.com/qaiddev/thumbs-native.
 `import QaidThumbs` re-exports the public types of `QaidThumbsCore`.
 
-0.3.0 renames 0.2's `QaidFeedback` and draws the sheet natively (SwiftUI). There is no
-web view, no bridge, no fallback form and no `annotateURL` any more.
-
-0.4.0 adds `style` (the sheet in the app's own colours, corners and light/dark),
-`present(dark:)`, and Move around (`allowBrowsing`, `text.browse*`). All additive.
+The sheet is drawn natively in SwiftUI, with no web view. It takes `style` (the app's own
+colours, corners and light/dark), `present(dark:)`, and Move around (`allowBrowsing`, `text.browse*`).
 
 ## QaidThumbs (`@MainActor public enum`)
 
@@ -151,13 +148,13 @@ title, subtitle (`{app}`), cancel, close, markup, record, positive, negative, ki
 messageLabel, placeholder, send, done, sending, sent, queued, retry, noScreenshot,
 removeScreenshot, screenRecording, markupTitle, markupHelp, markupUse, markupBack,
 **markupRectangle, markupArrow, markupPen, markupRedact, markupUndo, markupClear,
-markupColor (`{n}`)** (new in 0.3.0), attachScreenshot, recordInstead, errorGeneric,
+markupColor (`{n}`)**, attachScreenshot, recordInstead, errorGeneric,
 recordingStop, recordingStopLabel, recordingUnavailable, recordingNotStarted,
 recordingFailed, errorNotConfigured, errorSetup, errorRecordingsOff, errorQuota,
 errorTooLarge, errorServer, errorOffline, **markupFailed, discardTitle, discardConfirm,
-discardCancel** (new in 0.3.0, appended so existing calls compile; same names and English
+discardCancel** (same names and English
 as Android: "Couldn't add the marks. Try Use again.", "Discard this feedback?", "Discard",
-"Keep editing"), **browse, browseCapture, browseBack, browseHint** (new in 0.4.0: "Move around",
+"Keep editing"), **browse, browseCapture, browseBack, browseHint** ("Move around",
 "Use this screen", "Back", "Go to the screen with the problem, then tap Use this screen.").
 
 ```swift
@@ -165,8 +162,7 @@ public func subtitle(appName: String) -> String
 public func markupColor(number: Int) -> String
 ```
 
-`attachScreenshot` and `recordInstead` are no longer drawn (they belonged to the 0.2
-fallback form); kept so existing translations compile. Removed: `sharedKeys`, `bridgeText(appName:)`.
+`attachScreenshot` and `recordInstead` are kept but not drawn, so existing translations compile.
 
 ## Errors and log levels
 
@@ -188,30 +184,23 @@ public enum QaidError: Error, Equatable {
 public enum QaidLogLevel: String, Codable, Equatable { case log, warn, error }
 ```
 
-## Lower-level Core types (public, unchanged from 0.2 except the config rename)
+## Lower-level Core types (public)
 
 `QaidUser`, `AppMetadata`, `LogEntry`, `NetworkErrorEntry`, `NetworkPrivacy`, `RingBuffer`,
 `ReportContext`, `DiagnosticsStore`, `DeviceInfo`, `ScreenshotSubmission`, `FeedbackRequests`
-(now also `maxMessageLength`, `clampMessage(_:)`, `isImageDataUrl(_:)`, moved from the
-deleted `BridgeCodec`), `RetryPolicy`, `VideoPolicy`, `QueuePolicy`, `QueuedItem`,
+(with `maxMessageLength`, `clampMessage(_:)`, `isImageDataUrl(_:)`), `RetryPolicy`, `VideoPolicy`, `QueuePolicy`, `QueuedItem`,
 `QueueStore`, `MaskGeometry`, `ShakeDetector`.
-
-Removed from Core: `Bridge`, `BridgeTheme` (now `QaidTheme`), `BridgeAttachment`,
-`InitMessage`, `StatusMessage`, `QuestMessage`, `PageMessage`, `BridgeCodec`,
-`QaidConfiguration.annotateURL` / `annotateOrigin` / `defaultAnnotateURL(for:)` / `origin(of:)`.
 
 The sheet's state machine (`ThumbsSheetModel`) and the markup model (`MarkupDocument`,
 `MarkupShape`, `MarkupTool`, `MarkupCommand`, `ImageFit`, `ArrowGeometry`, `PenPath`,
 `MarkupRenderer`, `MarkupUse`) are `package`, not public API. `MarkupRenderer.use(_:on:)`
-(→ `.unchanged` / `.marked(dataUrl)` / `.failed`) replaced `apply(_:to:)`, whose nil meant
-both "no marks" and "failed".
+returns `.unchanged`, `.marked(dataUrl)` or `.failed`.
 
 ## Notes
 
-- User agent: `<App>/<ver> (<build>; iOS <os>; <model>) QaidThumbs/0.3.0`; `metadata.sdk` stays `qaid-ios/<ver>`.
-- Kept under their 0.2 names on purpose: the offline queue `Application Support/QaidFeedback/queue/`
-  (so reports queued by 0.2 still send) and the visitor id key `dev.qaid.feedback.visitorId`
-  (shared with QaidQuests).
+- User agent: `<App>/<ver> (<build>; iOS <os>; <model>) QaidThumbs/0.4.0`; `metadata.sdk` stays `qaid-ios/<ver>`.
+- On disk: the offline queue `Application Support/QaidFeedback/queue/` and the visitor id key
+  `dev.qaid.feedback.visitorId` (shared with QaidQuests).
 - Markup output: flattened at the screenshot's own pixel size, stroke `max(4, round(width / 220))`,
   JPEG 0.85. Redact is an opaque black box on whole pixels, rounded outward.
 - Linked quest: after a 2xx only, the sheet closes first and `onLinkedQuest` runs once it is
