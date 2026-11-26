@@ -26,6 +26,8 @@ import dev.qaid.thumbs.core.QaidLinkedQuest
 import dev.qaid.thumbs.core.QaidQuestLinks
 import dev.qaid.thumbs.core.QaidResult
 import dev.qaid.thumbs.core.QaidThumbsConfig
+import dev.qaid.thumbs.core.QaidUser
+import dev.qaid.thumbs.core.SecretKeyReports
 import dev.qaid.thumbs.internal.FeedbackTransport
 import dev.qaid.thumbs.internal.MarkupRenderer
 import dev.qaid.thumbs.internal.ScreenCapture
@@ -35,6 +37,7 @@ import okio.Buffer
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -120,6 +123,34 @@ class QaidThumbsFlowTest {
     private fun statusText(): String? =
         compose.onAllNodes(hasTestTag(ThumbsTags.STATUS), useUnmergedTree = true).fetchSemanticsNodes().firstOrNull()
             ?.config?.getOrElseNullable(androidx.compose.ui.semantics.SemanticsProperties.Text) { null }?.joinToString { it.text }
+
+    @Test fun aSecretKeyIsDroppedAndReportedOnce() {
+        val secret = "QAID_SECRET_abcdefghijklmnopqrstuvwxyz0123456789ABCD"
+        SecretKeyReports.reset()
+        try {
+            QaidThumbs.configure(compose.activity, config.copy(apiKey = secret))
+            QaidThumbs.setMetadata("token", "t $secret")
+            QaidThumbs.setUser(id = secret, email = "a@b.co")
+            assertEquals("", QaidThumbs.currentConfig!!.apiKey)
+            assertEquals("t", QaidThumbs.customMetadata.snapshot()["token"])
+            assertEquals(QaidUser(email = "a@b.co"), QaidThumbs.user)
+
+            // The report goes out on its own coroutine.
+            val deadline = System.currentTimeMillis() + 5_000
+            while (server.bodies.none { it.has("keyHash") } && System.currentTimeMillis() < deadline) Thread.sleep(10)
+            Thread.sleep(100)
+            val reports = server.bodies.filter { it.has("keyHash") }
+            assertEquals(1, reports.size)
+            assertEquals("thumbs-android", reports[0].getString("source"))
+            assertTrue(reports[0].getString("pageUrl").startsWith("app://"))
+            assertFalse(reports[0].toString().contains(secret))
+        } finally {
+            QaidThumbs.clearMetadata()
+            QaidThumbs.clearUser()
+            SecretKeyReports.reset()
+            QaidThumbs.configure(compose.activity, config)
+        }
+    }
 
     @Test fun sentReportHandsItsLinkedQuestOverAndCloses() {
         QaidThumbs.setUser(id = "u1")

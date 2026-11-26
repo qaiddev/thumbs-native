@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.res.Configuration
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.View
 import dev.qaid.thumbs.core.ConsoleLogs
 import dev.qaid.thumbs.core.CustomMetadata
@@ -17,6 +18,8 @@ import dev.qaid.thumbs.core.QaidLogLevel
 import dev.qaid.thumbs.core.QaidThumbsConfig
 import dev.qaid.thumbs.core.QaidUser
 import dev.qaid.thumbs.core.RingBuffer
+import dev.qaid.thumbs.core.SecretKeyGuard
+import dev.qaid.thumbs.core.SecretKeyReports
 import dev.qaid.thumbs.internal.FeedbackTransport
 import dev.qaid.thumbs.internal.HttpTransport
 import dev.qaid.thumbs.internal.NetworkErrorInterceptor
@@ -27,6 +30,10 @@ import dev.qaid.thumbs.internal.ScreenCapturer
 import dev.qaid.thumbs.internal.SensitiveViews
 import dev.qaid.thumbs.internal.ShakeToReport
 import dev.qaid.thumbs.internal.ThumbsSession
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import okhttp3.Interceptor
 
 /**
@@ -88,15 +95,39 @@ object QaidThumbs {
      * (the first [present] or [enableShakeToReport]); prefer the overload that takes a context.
      */
     fun configure(config: QaidThumbsConfig) {
-        this.config = config
+        this.config = guarded(config) { it.pageUrl }
         ReportQueue.flush()
     }
 
-    /** Configure, and send any reports saved while the app was offline. */
+    /**
+     * Configure, and send any reports saved while the app was offline.
+     *
+     * A platform API secret (`QAID_SECRET_…`) anywhere in [config] is dropped, logged as an
+     * error and reported to qaid (its hash only), which revokes it.
+     */
     fun configure(context: Context, config: QaidThumbsConfig) {
-        this.config = config
+        this.config = guarded(config) { it.pageUrlBase(context.packageName) }
         ReportQueue.attach(context)
         ReportQueue.flush()
+    }
+
+    /** [config] with any secret taken out; reports go to its endpoint, under [pageUrl] of it. */
+    private fun guarded(config: QaidThumbsConfig, pageUrl: (QaidThumbsConfig) -> String?): QaidThumbsConfig {
+        val found = mutableListOf<String>()
+        val clean = SecretKeyGuard.scrub(config, found)
+        SecretKeyReports.setDestination(clean.endpoint, pageUrl(clean))
+        reportSecrets(found)
+        return clean
+    }
+
+    private val secretScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /** Logs a found secret and posts its hash to qaid, once per secret per process. */
+    internal fun reportSecrets(found: List<String>) {
+        SecretKeyReports.report(found, log = { Log.e(TAG, it) }) { url, body ->
+            val request = SecretKeyGuard.reportRequest(url, body)
+            secretScope.launch { runCatching { transport.send(request) } }
+        }
     }
 
     val isConfigured: Boolean get() = config != null
@@ -106,7 +137,13 @@ object QaidThumbs {
 
     /** Who is signed in, sent with every report as `metadata.user`. Blank values are left out. */
     fun setUser(id: String? = null, email: String? = null, name: String? = null) {
-        user = QaidUser(id, email, name).cleaned()
+        val found = mutableListOf<String>()
+        user = QaidUser(
+            SecretKeyGuard.scrubOrNull(id, found),
+            SecretKeyGuard.scrubOrNull(email, found),
+            SecretKeyGuard.scrubOrNull(name, found),
+        ).cleaned()
+        reportSecrets(found)
     }
 
     fun clearUser() {
@@ -118,7 +155,11 @@ object QaidThumbs {
      * null removes the key. At most 30 keys (new ones past that are ignored), keys cut to
      * 64 characters, values to 500.
      */
-    fun setMetadata(key: String, value: String?) = customMetadata.set(key, value)
+    fun setMetadata(key: String, value: String?) {
+        val found = mutableListOf<String>()
+        customMetadata.set(key, SecretKeyGuard.scrubOrNull(value, found))
+        reportSecrets(found)
+    }
 
     fun clearMetadata() = customMetadata.clear()
 
@@ -206,6 +247,9 @@ object QaidThumbs {
         main.post { hook(quest) }
         return true
     }
+
+    /** The logcat tag; [dev.qaid.thumbs.core.ConsoleLogs] keeps it out of reports. */
+    private const val TAG = "QaidThumbs"
 
     /** Before configure(), qaid's own endpoints are still known by their defaults. */
     private val DEFAULT_CONFIG = QaidThumbsConfig(apiKey = "", appName = "")

@@ -34,8 +34,16 @@ public enum QaidThumbs {
     public static var onLinkedQuest: ((QaidLinkedQuest) -> Void)?
 
     /// Also sends any reports saved while offline, and keeps watching for the network.
+    ///
+    /// A platform API secret (`QAID_SECRET_…`) anywhere in the configuration is dropped,
+    /// logged as an error and reported to qaid (its hash only), which revokes it.
     public static func configure(_ configuration: QaidThumbsConfiguration) {
+        let (configuration, secrets) = SecretKeyGuard.scrub(configuration)
         self.configuration = configuration
+        let page = configuration.pageUrl
+            ?? QaidThumbsConfiguration.defaultPageUrl(bundleIdentifier: Bundle.main.bundleIdentifier ?? "")
+        SecretKeyReporter.shared.setDestination(endpoint: configuration.endpoint, pageUrl: page.absoluteString)
+        reportSecrets(secrets)
         diagnostics.setOwnEndpoints(for: configuration)
         FeedbackQueue.shared.start()
     }
@@ -91,7 +99,9 @@ public enum QaidThumbs {
 
     /// Who is using the app. Sent with every report as `metadata.user`; nil fields are left out.
     nonisolated public static func setUser(id: String? = nil, email: String? = nil, name: String? = nil) {
-        DiagnosticsStore.shared.setUser(QaidUser(id: id, email: email, name: name))
+        let (user, secrets) = SecretKeyGuard.scrub(QaidUser(id: id, email: email, name: name))
+        reportSecrets(secrets)
+        DiagnosticsStore.shared.setUser(user)
     }
 
     nonisolated public static func clearUser() {
@@ -101,7 +111,16 @@ public enum QaidThumbs {
     /// One key/value sent with every report under `metadata.custom`; nil removes it.
     /// Up to 30 keys; keys are cut to 64 characters and values to 500.
     nonisolated public static func setMetadata(key: String, value: String?) {
+        let (value, secrets) = SecretKeyGuard.scrub(value)
+        reportSecrets(secrets)
         DiagnosticsStore.shared.setMetadata(key, value)
+    }
+
+    /// Logs a found secret and posts its hash to qaid, once per secret per process.
+    nonisolated static func reportSecrets(_ secrets: [String]) {
+        SecretKeyReporter.shared.report(secrets) { request in
+            URLSession.shared.dataTask(with: request) { _, _, _ in }.resume()
+        }
     }
 
     nonisolated public static func clearMetadata() {
