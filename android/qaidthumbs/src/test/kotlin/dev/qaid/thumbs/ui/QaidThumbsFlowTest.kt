@@ -168,7 +168,7 @@ class QaidThumbsFlowTest {
         assertEquals("works", body.getString("message"))
         assertTrue(body.getString("pageUrl").endsWith("/home"))
         assertTrue(body.getString("screenshot").startsWith("data:image/"))
-        assertTrue(body.getString("userAgent").contains("QaidThumbs/0.4.0"))
+        assertTrue(body.getString("userAgent").contains("QaidThumbs/0.5.0"))
         val quest = quests.single()
         assertEquals("q_up", quest.questId)
         assertEquals("fb_1", quest.feedbackId)

@@ -1,4 +1,4 @@
-# QaidThumbs (iOS) 0.4.0 — public API
+# QaidThumbs (iOS) 0.5.0 — public API
 
 SwiftPM product `QaidThumbs` (iOS 15+), repo github.com/qaiddev/thumbs-native.
 `import QaidThumbs` re-exports the public types of `QaidThumbsCore`.
@@ -137,7 +137,7 @@ public struct NeonAccent: Codable, Equatable, Sendable {
     public static func forTheme(_ theme: QaidTheme) -> NeonAccent
 }
 
-public enum QaidThumbsSDK { public static let version: String }   // "0.4.0"
+public enum QaidThumbsSDK { public static let version: String }   // "0.5.0"
 ```
 
 ## QaidText (`public struct QaidText: Equatable, Sendable`)
@@ -198,7 +198,7 @@ returns `.unchanged`, `.marked(dataUrl)` or `.failed`.
 
 ## Notes
 
-- User agent: `<App>/<ver> (<build>; iOS <os>; <model>) QaidThumbs/0.4.0`; `metadata.sdk` stays `qaid-ios/<ver>`.
+- User agent: `<App>/<ver> (<build>; iOS <os>; <model>) QaidThumbs/0.5.0`; `metadata.sdk` stays `qaid-ios/<ver>`.
 - On disk: the offline queue `Application Support/QaidFeedback/queue/` and the visitor id key
   `dev.qaid.feedback.visitorId` (shared with QaidQuests).
 - Markup output: flattened at the screenshot's own pixel size, stroke `max(4, round(width / 220))`,

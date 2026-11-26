@@ -9,8 +9,8 @@ recording. Its sister SDK, [quests-native](https://github.com/qaiddev/quests-nat
 
 | Platform | Install | Needs |
 | --- | --- | --- |
-| iOS | Swift Package Manager: `https://github.com/qaiddev/thumbs-native`, product `QaidThumbs`, from `0.4.0` | iOS 15+ |
-| Android | The `android/qaidthumbs` module from this repo (`dev.qaid:thumbs:0.4.0` is not on Maven Central yet) | minSdk 26, compileSdk 35+, Compose compiler plugin |
+| iOS | Swift Package Manager: `https://github.com/qaiddev/thumbs-native`, product `QaidThumbs`, from `0.5.0` | iOS 15+ |
+| Android | The `android/qaidthumbs` module from this repo (`dev.qaid:thumbs:0.5.0` is not on Maven Central yet) | minSdk 26, compileSdk 35+, Compose compiler plugin |
 
 <p>
   <img alt="The feedback sheet in dark mode, with a screenshot of the app, Not working picked and a message" src="https://raw.githubusercontent.com/qaiddev/thumbs-native/prod/docs/screenshots/sheet-dark.png" width="260">

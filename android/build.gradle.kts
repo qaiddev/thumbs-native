@@ -40,7 +40,7 @@ project(":qaidthumbs") {
                     variant = "release",
                 ),
             )
-            coordinates("dev.qaid", "thumbs", "0.4.0")
+            coordinates("dev.qaid", "thumbs", "0.5.0")
             publishToMavenCentral()
             if (hasSigningKey) signAllPublications()
             pom {

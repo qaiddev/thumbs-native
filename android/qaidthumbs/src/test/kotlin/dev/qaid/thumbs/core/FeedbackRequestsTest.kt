@@ -109,7 +109,7 @@ class JsonRequestTest {
     }
 
     @Test fun versionIs030() {
-        assertEquals("0.4.0", QaidThumbsSdk.VERSION)
+        assertEquals("0.5.0", QaidThumbsSdk.VERSION)
     }
 }
 

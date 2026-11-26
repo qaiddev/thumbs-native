@@ -1,6 +1,6 @@
 # qaid thumbs for Android — notes
 
-Artifact `dev.qaid:thumbs:0.4.0` (not on Maven Central yet), module `:qaidthumbs`,
+Artifact `dev.qaid:thumbs:0.5.0` (not on Maven Central yet), module `:qaidthumbs`,
 namespace `dev.qaid.thumbs`, minSdk 26, AAR `minCompileSdk` 35.
 Compose BOM 2026.04.01 (Compose 1.11, Material 3 1.4), core-ktx 1.16.0, activity-ktx 1.10.1,
 okhttp 5.3.2 (`api`), coroutines 1.11.0. No WebView, no androidx.webkit.
@@ -40,7 +40,7 @@ object QaidThumbs {
 var View.qaidSensitive: Boolean
 
 // dev.qaid.thumbs.core
-object QaidThumbsSdk { const val VERSION = "0.4.0" }
+object QaidThumbsSdk { const val VERSION = "0.5.0" }
 
 data class QaidThumbsConfig(
     val apiKey: String,
